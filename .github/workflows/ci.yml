@@ -1,0 +1,39 @@
+name: SCM
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  headless:
+    name: Headless tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install Neovim 0.12.2
+        run: |
+          curl -fsSLO https://github.com/neovim/neovim/releases/download/v0.12.2/nvim-linux-x86_64.tar.gz
+          echo "31cf85945cb600d96cdf69f88bc68bec814acbff50863c5546adef3a1bcef260  nvim-linux-x86_64.tar.gz" | sha256sum -c -
+          tar xzf nvim-linux-x86_64.tar.gz
+          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: Show Neovim version
+        run: nvim --version
+
+      - name: Run SCM headless tests
+        run: |
+          nvim -l tests/handoff_test.lua
+          nvim -l tests/core_test.lua
+          nvim -l tests/explorer_scope_test.lua
+
+      - name: Check proposed diff for whitespace errors
+        if: github.event_name == 'pull_request'
+        run: git diff --check "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
