@@ -10,21 +10,21 @@
 
 ## Global Constraints
 
-- Plugin root: `/Users/davidlee/Projects/Sprite/phase_0/scm.nvim` (inside the Sprite git repo; ALL commits happen in `/Users/davidlee/Projects/Sprite`)
+- Plugin root: `the repository root` (inside the Sprite git repo; ALL commits happen in `/Users/davidlee/Projects/Sprite`)
 - `~/.config/nvim` is NOT a git repo — the one file there (Task 6's spec) is not committed anywhere; everything else must be committed to the Sprite repo
 - `scm/core.lua` must never `require` snacks or any UI module (PRD goal 3; verified by test in Task 1)
 - File Entries carry raw `xy` codes verbatim (`.M`, `MM`, `??`, `R.`, `UU`) — never derived fields (ADR 0002)
 - Defaults: `roots = { "~/MyServe1.0", "~/Code" }`, `depth = 2`, git timeout 5000ms
-- Tests run headless: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua` → exits 0 printing `OK`, non-zero on any assert failure
-- Terminology per `phase_0/CONTEXT.md`: Core, Panel, Renderer, Root, Repo Entry, File Entry, XY Code, Mixed State, Panel-Launched lazygit
+- Tests run headless: `cd the repository root && nvim -l tests/core_test.lua` → exits 0 printing `OK`, non-zero on any assert failure
+- Terminology per `CONTEXT.md`: Core, Panel, Renderer, Root, Repo Entry, File Entry, XY Code, Mixed State, Panel-Launched lazygit
 
 ---
 
 ### Task 1: Core — porcelain-v2 parser
 
 **Files:**
-- Create: `phase_0/scm.nvim/lua/scm/core.lua`
-- Create: `phase_0/scm.nvim/tests/core_test.lua`
+- Create: `lua/scm/core.lua`
+- Create: `tests/core_test.lua`
 
 **Interfaces:**
 - Produces: `require("scm.core").parse_status(lines: string[]) -> { branch: string, ahead: integer, behind: integer, files: { {path: string, xy: string} } }`
@@ -32,7 +32,7 @@
 
 - [ ] **Step 1: Write the failing test**
 
-Create `phase_0/scm.nvim/tests/core_test.lua`:
+Create `tests/core_test.lua`:
 
 ```lua
 -- Headless test harness: run with `nvim -l tests/core_test.lua` from the
@@ -102,15 +102,15 @@ print("OK")
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: FAIL — `module 'scm.core' not found`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `phase_0/scm.nvim/lua/scm/core.lua`:
+Create `lua/scm/core.lua`:
 
 ```lua
--- scm.core — the UI-free Core (see phase_0/CONTEXT.md).
+-- scm.core — the UI-free Core (see CONTEXT.md).
 -- Emits Repo Entries; never requires any UI module (ADR 0001/0002).
 local M = {}
 
@@ -170,14 +170,14 @@ return M
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: prints `OK`, exit code 0
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /Users/davidlee/Projects/Sprite
-git add phase_0/scm.nvim
+git add the repository root
 git commit -m "feat(scm): porcelain-v2 parser with raw xy File Entries"
 ```
 
@@ -186,8 +186,8 @@ git commit -m "feat(scm): porcelain-v2 parser with raw xy File Entries"
 ### Task 2: Core — repo scanner
 
 **Files:**
-- Modify: `phase_0/scm.nvim/lua/scm/core.lua` (append before `return M`)
-- Modify: `phase_0/scm.nvim/tests/core_test.lua` (append before `print("OK")`)
+- Modify: `lua/scm/core.lua` (append before `return M`)
+- Modify: `tests/core_test.lua` (append before `print("OK")`)
 
 **Interfaces:**
 - Consumes: `M.defaults` from Task 1
@@ -212,7 +212,7 @@ eq(repos, { tmp .. "/alpha", tmp .. "/beta" }, "scan finds dir+file .git, sorted
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: FAIL — `attempt to call field 'scan' (a nil value)`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -245,14 +245,14 @@ end
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: prints `OK`, exit code 0
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /Users/davidlee/Projects/Sprite
-git add phase_0/scm.nvim
+git add the repository root
 git commit -m "feat(scm): repo scanner over configured Roots"
 ```
 
@@ -261,8 +261,8 @@ git commit -m "feat(scm): repo scanner over configured Roots"
 ### Task 3: Core — async refresh (Repo Entry assembly)
 
 **Files:**
-- Modify: `phase_0/scm.nvim/lua/scm/core.lua` (append before `return M`)
-- Modify: `phase_0/scm.nvim/tests/core_test.lua` (append before `print("OK")`)
+- Modify: `lua/scm/core.lua` (append before `return M`)
+- Modify: `tests/core_test.lua` (append before `print("OK")`)
 
 **Interfaces:**
 - Consumes: `M.scan`, `M.parse_status`, `M.defaults` (Tasks 1-2)
@@ -325,7 +325,7 @@ assert(got and #got == 2, "second refresh works")
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: FAIL — `attempt to call field 'refresh' (a nil value)`
 
 - [ ] **Step 3: Write minimal implementation**
@@ -400,14 +400,14 @@ end
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: prints `OK`, exit code 0
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /Users/davidlee/Projects/Sprite
-git add phase_0/scm.nvim
+git add the repository root
 git commit -m "feat(scm): async refresh assembling sorted Repo Entries"
 ```
 
@@ -416,8 +416,8 @@ git commit -m "feat(scm): async refresh assembling sorted Repo Entries"
 ### Task 4: Panel — display derivation + item building (pure part)
 
 **Files:**
-- Create: `phase_0/scm.nvim/lua/scm/panel.lua`
-- Modify: `phase_0/scm.nvim/tests/core_test.lua` (append before `print("OK")`)
+- Create: `lua/scm/panel.lua`
+- Modify: `tests/core_test.lua` (append before `print("OK")`)
 
 **Interfaces:**
 - Consumes: Repo Entry shape from Task 3
@@ -466,12 +466,12 @@ for i, it in ipairs(items) do eq(it.sort, i, "sort field " .. i) end
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: FAIL — `module 'scm.panel' not found`
 
 - [ ] **Step 3: Write minimal implementation**
 
-Create `phase_0/scm.nvim/lua/scm/panel.lua`:
+Create `lua/scm/panel.lua`:
 
 ```lua
 -- scm.panel — the snacks Renderer for Core's Repo Entries (ADR 0001).
@@ -534,14 +534,14 @@ return M
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: prints `OK`, exit code 0
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /Users/davidlee/Projects/Sprite
-git add phase_0/scm.nvim
+git add the repository root
 git commit -m "feat(scm): xy display derivation and picker item building"
 ```
 
@@ -550,7 +550,7 @@ git commit -m "feat(scm): xy display derivation and picker item building"
 ### Task 5: Panel — picker wiring (open/toggle, format, keys, refresh plumbing)
 
 **Files:**
-- Modify: `phase_0/scm.nvim/lua/scm/panel.lua` (append before `return M`)
+- Modify: `lua/scm/panel.lua` (append before `return M`)
 
 **Interfaces:**
 - Consumes: `core.refresh` (Task 3), `M.xy_display`/`M.build_items` (Task 4), snacks APIs verified against installed source: `Snacks.picker.pick(opts)`, `Snacks.picker.get({source=...})`, `picker:find()`, `picker:current()`, `picker.list:view(idx)`, `picker.list.win:set_title(t)`, `require("snacks.picker.actions").jump(picker, item, action)`
@@ -748,14 +748,14 @@ end
 
 - [ ] **Step 4: Sanity-run the test suite (pure parts unbroken)**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: prints `OK` (wiring code must not break headless loading — `Snacks` is only referenced inside functions, never at module load)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /Users/davidlee/Projects/Sprite
-git add phase_0/scm.nvim
+git add the repository root
 git commit -m "feat(scm): snacks picker wiring — sidebar panel, keys, refresh plumbing"
 ```
 
@@ -764,7 +764,7 @@ git commit -m "feat(scm): snacks picker wiring — sidebar panel, keys, refresh 
 ### Task 6: Plugin spec, post-lazygit refresh, end-to-end verification
 
 **Files:**
-- Modify: `phase_0/scm.nvim/lua/scm/panel.lua` (replace `M.lazygit`)
+- Modify: `lua/scm/panel.lua` (replace `M.lazygit`)
 - Create: `/Users/davidlee/.config/nvim/lua/plugins/scm.lua` (NOT committed — config is not a repo)
 
 **Interfaces:**
@@ -797,10 +797,10 @@ Create `/Users/davidlee/.config/nvim/lua/plugins/scm.lua`:
 -- Sprite Phase 0.1: multi-repo source control panel (scm.nvim, local plugin).
 -- <leader>gs deliberately overrides LazyVim's single-repo git_status picker
 -- (still reachable via :lua Snacks.picker.git_status()).
--- Code + docs: ~/Projects/Sprite/phase_0/scm.nvim
+-- Code + docs: ~/Projects/Sprite/the repository root
 return {
   {
-    dir = vim.fn.expand("~/Projects/Sprite/phase_0/scm.nvim"),
+    dir = vim.fn.expand("~/Projects/Sprite/the repository root"),
     name = "scm.nvim",
     dependencies = { "folke/snacks.nvim" },
     keys = {
@@ -818,7 +818,7 @@ return {
 
 - [ ] **Step 3: Run the full headless suite one final time**
 
-Run: `cd /Users/davidlee/Projects/Sprite/phase_0/scm.nvim && nvim -l tests/core_test.lua`
+Run: `cd the repository root && nvim -l tests/core_test.lua`
 Expected: prints `OK`, exit code 0
 
 - [ ] **Step 4: Manual verification checklist (PRD §6/§7 — run in a real Neovim)**
@@ -842,7 +842,7 @@ Record any failures; fix before proceeding (return to the relevant task's code).
 
 ```bash
 cd /Users/davidlee/Projects/Sprite
-git add phase_0/scm.nvim
+git add the repository root
 git commit -m "feat(scm): panel-launched lazygit refresh hook; v1 complete"
 ```
 

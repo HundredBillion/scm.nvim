@@ -28,12 +28,12 @@
 
 ## File Structure
 
-- Create `phase_0/scm.nvim/lua/scm/scope.lua`: explorer adapters, normalization, and native tab-local Explorer Root persistence.
-- Modify `phase_0/scm.nvim/lua/scm/core.lua`: replace configured/depth-limited scanning with request-local asynchronous discovery and status collection.
-- Modify `phase_0/scm.nvim/lua/scm/panel.lua`: tab-scoped view state, explorer capture, per-tab full-Refresh coalescing, and error rendering.
-- Modify `phase_0/scm.nvim/lua/scm/refresh.lua`: keep full Refresh current-tab scoped and fan scoped repository results into every interested tab.
-- Modify `phase_0/scm.nvim/tests/core_test.lua`: adapt the existing Core and Panel regression suite to the new interfaces.
-- Create `phase_0/scm.nvim/tests/explorer_scope_test.lua`: focused Explorer Root, provider, tab-isolation, and stale-generation tests.
+- Create `lua/scm/scope.lua`: explorer adapters, normalization, and native tab-local Explorer Root persistence.
+- Modify `lua/scm/core.lua`: replace configured/depth-limited scanning with request-local asynchronous discovery and status collection.
+- Modify `lua/scm/panel.lua`: tab-scoped view state, explorer capture, per-tab full-Refresh coalescing, and error rendering.
+- Modify `lua/scm/refresh.lua`: keep full Refresh current-tab scoped and fan scoped repository results into every interested tab.
+- Modify `tests/core_test.lua`: adapt the existing Core and Panel regression suite to the new interfaces.
+- Create `tests/explorer_scope_test.lua`: focused Explorer Root, provider, tab-isolation, and stale-generation tests.
 - Modify `.github/workflows/scm.yml`: run both headless suites.
 - Modify `/Users/dalee/.config/nvim/lua/plugins/snacks.lua`: remember the Snacks explorer root without replacing the existing `svgtree` hook.
 - Modify `/Users/dalee/.config/nvim/lua/plugins/neo-tree.lua`: remember the Neo-tree filesystem root on its public window-open event if Neo-tree is enabled later.
@@ -42,8 +42,8 @@
 ### Task 1: Persistent Explorer Root module
 
 **Files:**
-- Create: `phase_0/scm.nvim/lua/scm/scope.lua`
-- Create: `phase_0/scm.nvim/tests/explorer_scope_test.lua`
+- Create: `lua/scm/scope.lua`
+- Create: `tests/explorer_scope_test.lua`
 
 **Interfaces:**
 - Consumes: active Snacks picker `picker:cwd()`, loaded Neo-tree filesystem state `{ path, winid }`, `LazyVim.root()`, and `vim.fn.getcwd()`.
@@ -117,7 +117,7 @@ print("OK explorer scope")
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 ```
 
@@ -193,7 +193,7 @@ return M
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 /Users/dalee/.local/bin/nvim-nightly -l tests/core_test.lua
 ```
@@ -203,15 +203,15 @@ Expected: `OK explorer scope`, then `OK`, both with exit code 0.
 - [ ] **Step 5: Commit the scope module**
 
 ```sh
-git add phase_0/scm.nvim/lua/scm/scope.lua phase_0/scm.nvim/tests/explorer_scope_test.lua
+git add lua/scm/scope.lua tests/explorer_scope_test.lua
 git commit -m "feat(scm): remember explorer roots per tab"
 ```
 
 ### Task 2: Asynchronous containing-and-nested repository discovery
 
 **Files:**
-- Modify: `phase_0/scm.nvim/lua/scm/core.lua:5-14,61-81,83,145-181`
-- Modify: `phase_0/scm.nvim/tests/core_test.lua:56-195`
+- Modify: `lua/scm/core.lua:5-14,61-81,83,145-181`
+- Modify: `tests/core_test.lua:56-195`
 
 **Interfaces:**
 - Consumes: one normalized Explorer Root string and Core options containing `timeout_ms`.
@@ -290,7 +290,7 @@ Delete the old assertion that a second Core Refresh is dropped; Task 3 tests per
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/core_test.lua
 ```
 
@@ -394,7 +394,7 @@ end
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/core_test.lua
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 ```
@@ -404,16 +404,16 @@ Expected: both print their `OK` line and exit 0.
 - [ ] **Step 5: Commit asynchronous discovery**
 
 ```sh
-git add phase_0/scm.nvim/lua/scm/core.lua phase_0/scm.nvim/tests/core_test.lua
+git add lua/scm/core.lua tests/core_test.lua
 git commit -m "feat(scm): discover repositories from explorer root"
 ```
 
 ### Task 3: Tab-scoped Panel state and full-Refresh coordination
 
 **Files:**
-- Modify: `phase_0/scm.nvim/lua/scm/panel.lua:72-94,221-344`
-- Modify: `phase_0/scm.nvim/tests/core_test.lua:338-597`
-- Modify: `phase_0/scm.nvim/tests/explorer_scope_test.lua`
+- Modify: `lua/scm/panel.lua:72-94,221-344`
+- Modify: `tests/core_test.lua:338-597`
+- Modify: `tests/explorer_scope_test.lua`
 - Modify: `/Users/dalee/.config/nvim/lua/plugins/snacks.lua:32-48`
 - Modify: `/Users/dalee/.config/nvim/lua/plugins/neo-tree.lua:6-16`
 
@@ -494,7 +494,7 @@ core.refresh = old_refresh
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 ```
 
@@ -740,7 +740,7 @@ refresh_picker._scm_tab = vim.api.nvim_get_current_tabpage()
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/core_test.lua
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 ```
@@ -750,7 +750,7 @@ Expected: both `OK` lines, exit 0.
 - [ ] **Step 9: Commit tab-scoped Panel behavior**
 
 ```sh
-git add phase_0/scm.nvim/lua/scm/panel.lua phase_0/scm.nvim/tests/core_test.lua phase_0/scm.nvim/tests/explorer_scope_test.lua
+git add lua/scm/panel.lua tests/core_test.lua tests/explorer_scope_test.lua
 git commit -m "feat(scm): isolate panel state by explorer tab"
 ```
 
@@ -759,9 +759,9 @@ The user-local Snacks and Neo-tree configuration changes remain outside the repo
 ### Task 4: Scoped-refresh fanout, CI, and live integration
 
 **Files:**
-- Modify: `phase_0/scm.nvim/lua/scm/panel.lua:346-370`
-- Modify: `phase_0/scm.nvim/lua/scm/refresh.lua:17-29,76-90`
-- Modify: `phase_0/scm.nvim/tests/explorer_scope_test.lua`
+- Modify: `lua/scm/panel.lua:346-370`
+- Modify: `lua/scm/refresh.lua:17-29,76-90`
+- Modify: `tests/explorer_scope_test.lua`
 - Modify: `.github/workflows/scm.yml:29-31`
 - Modify: `/Users/dalee/.config/nvim/lua/plugins/scm.lua:17`
 
@@ -795,7 +795,7 @@ core.refresh_repo = old_refresh_repo
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 ```
 
@@ -846,7 +846,7 @@ Replace the comment above `M.full()` with:
 Run:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/core_test.lua
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 ```
@@ -859,7 +859,7 @@ Change the workflow test step to:
 
 ```yaml
       - name: Run SCM headless tests
-        working-directory: phase_0/scm.nvim
+        working-directory: the repository root
         run: |
           nvim -l tests/core_test.lua
           nvim -l tests/explorer_scope_test.lua
@@ -876,7 +876,7 @@ opts = {}, -- Explorer Root is derived from the active file tree per tab
 Run the complete suites through the real binary:
 
 ```sh
-cd /Users/dalee/Projects/Sprite/phase_0/scm.nvim
+cd /Users/dalee/Projects/Sprite/the repository root
 /Users/dalee/.local/bin/nvim-nightly -l tests/core_test.lua
 /Users/dalee/.local/bin/nvim-nightly -l tests/explorer_scope_test.lua
 git diff --check
@@ -896,7 +896,7 @@ Expected: every item passes; neither headless suite reports an assertion; `git d
 - [ ] **Step 7: Commit integration and CI**
 
 ```sh
-git add phase_0/scm.nvim/lua/scm/panel.lua phase_0/scm.nvim/lua/scm/refresh.lua phase_0/scm.nvim/tests/explorer_scope_test.lua .github/workflows/scm.yml
+git add lua/scm/panel.lua lua/scm/refresh.lua tests/explorer_scope_test.lua .github/workflows/scm.yml
 git commit -m "test(scm): verify explorer-scoped refresh behavior"
 ```
 

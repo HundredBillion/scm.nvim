@@ -1,30 +1,18 @@
 # scm.nvim
 
-`scm.nvim` is Sprite's Phase 0 multi-repository source-control panel for
-Neovim. It discovers every Git repository under the current Explorer root and
-renders their status in one persistent Snacks sidebar.
+`scm.nvim` is a multi-repository source-control panel for Neovim. It discovers
+every Git repository under the current Explorer root and renders their status
+in one persistent Snacks sidebar.
 
-## Install from the Sprite repository
+Originally developed inside the [Sprite](https://github.com/HundredBillion/Sprite)
+repository as its Phase 0 track, it now lives here as a standalone plugin.
 
-The current setup uses a sparse local clone of Sprite. The clone lives where
-Lazy normally stores plugins, while the plugin itself is the nested
-`phase_0/scm.nvim` directory:
-
-```bash
-SCM_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/lazy/scm.nvim"
-git clone --filter=blob:none --sparse \
-  https://github.com/HundredBillion/Sprite.git \
-  "$SCM_DIR"
-git -C "$SCM_DIR" sparse-checkout set phase_0/scm.nvim
-```
-
-Point Lazy at that nested local directory:
+## Install
 
 ```lua
 return {
   {
-    name = "scm.nvim",
-    dir = vim.fn.stdpath("data") .. "/lazy/scm.nvim/phase_0/scm.nvim",
+    "HundredBillion/scm.nvim",
     dependencies = { "folke/snacks.nvim" },
     opts = {},
     keys = {
@@ -42,9 +30,6 @@ return {
   },
 }
 ```
-
-This local-clone bootstrap is the current development installation path. It is
-not a standalone Lazy package URL because the plugin remains inside Sprite.
 
 ## Explorer handoff mappings
 

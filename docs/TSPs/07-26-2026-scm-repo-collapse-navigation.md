@@ -78,7 +78,7 @@ plain-assert `nvim -l` harness. No runtime dependencies were added.
 From the repository root:
 
 ```sh
-cd phase_0/scm.nvim
+cd "$(git rev-parse --show-toplevel)"
 nvim -l tests/core_test.lua
 ```
 

@@ -100,7 +100,7 @@ configuration:
 Run the complete existing harness with:
 
 ```sh
-cd phase_0/scm.nvim
+cd "$(git rev-parse --show-toplevel)"
 nvim -l tests/core_test.lua
 ```
 

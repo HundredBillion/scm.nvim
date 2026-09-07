@@ -1,7 +1,7 @@
 # PRD: Multi-Repo Source Control Panel (Sprite Phase 0.1)
 
 **Date:** 2026-07-20
-**Status:** Approved + grilled (2026-07-20). Glossary: `phase_0/CONTEXT.md`; ADRs 0001-0002.
+**Status:** Approved + grilled (2026-07-20). Glossary: `CONTEXT.md`; ADRs 0001-0002.
 **Owner:** David Lee
 **Working name:** `scm` (Lua module namespace; standalone plugin name decided at
 promotion time)
@@ -58,9 +58,9 @@ neogit, diffview are all single-repo) — this niche is validated open.
 ### 4.1 Components
 
 ```
-~/Projects/Sprite/phase_0/scm.nvim/lua/scm/core.lua    -- portable brain: scan, status, refresh. NO UI imports.
-~/Projects/Sprite/phase_0/scm.nvim/lua/scm/panel.lua   -- snacks picker render layer (disposable face)
-~/Projects/Sprite/phase_0/scm.nvim/tests/core_test.lua -- headless assert tests (nvim -l)
+lua/scm/core.lua    -- portable brain: scan, status, refresh. NO UI imports.
+lua/scm/panel.lua   -- snacks picker render layer (disposable face)
+tests/core_test.lua -- headless assert tests (nvim -l)
 ~/.config/nvim/lua/plugins/scm.lua                     -- thin spec: dir=<plugin path>, <leader>gs key, opts
 ```
 
