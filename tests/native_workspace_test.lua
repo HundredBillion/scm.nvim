@@ -2,6 +2,7 @@ vim.opt.runtimepath:prepend(vim.uv.cwd())
 local pending, request, dock, fail
 local row_callbacks = {}
 local renders, closed = 0, 0
+local focused, editor_focused = 0, 0
 package.loaded.sprite = {
   available=function(cb) pending=cb end,
   open=function(opts, cb)
@@ -13,8 +14,8 @@ package.loaded.sprite = {
         dock.revision, dock.rows_value, dock.selected = revision,rows,selected
         row_callbacks[#row_callbacks+1]=done
       end,
-      focus=function(_, done) if done then done() end end,
-      focus_editor=function(_, done) if done then done() end end,
+      focus=function(_, done) focused=focused+1; if done then done() end end,
+      focus_editor=function(_, done) editor_focused=editor_focused+1; if done then done() end end,
       close=function() closed=closed+1 end,
     }
     if fail then cb({message='refused'}) else cb(nil,dock) end
@@ -32,9 +33,15 @@ assert(pending, 'auto checks Sprite capabilities')
 pending(nil, {features={'owned-dock-v1','virtual-list-v1'}})
 assert(request and request.description.root.heading.text=='SOURCE CONTROL', 'native source control dock opens')
 assert(renders==1, 'initial native rows sent')
+request.on_event({type='input', key='ctrl-l'})
+assert(editor_focused==1, 'Ctrl-l focuses editor even while rows are pending')
+assert(scm.focus('left') == true, 'SCM exposes native focus entry point')
+assert(focused==1, 'focus request reaches native dock')
+assert(scm.focus('right') == false, 'left dock cannot handle right focus')
 vim.api.nvim_exec_autocmds('FocusGained', {})
 assert(vim.wait(5000, function() return #row_callbacks>0 end))
 row_callbacks[1]()
+assert(focused==1, 'row acknowledgement does not steal focus back')
 assert(vim.wait(5000, function() return renders>=2 end), 'Git refresh reaches native dock')
 row_callbacks[2]()
 request.on_event({type='input', key='down'})

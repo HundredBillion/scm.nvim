@@ -25,7 +25,14 @@ function M.open(opts, action, ready, failed)
     if self.dock then self.dock:close() end
   end
   function view:selection() return self.selected end
+  function view:focus()
+    if self.closed or not self.dock then return false end
+    self.focused=true
+    self.dock:focus(function(err) if err then fail(err) end end)
+    return true
+  end
   function view:focus_editor()
+    self.focused=true
     if self.dock then self.dock:focus_editor(function(err) if err then fail(err) end end) end
   end
   local flush
@@ -59,7 +66,13 @@ function M.open(opts, action, ready, failed)
     flush()
   end
   local function event(ev)
-    if view.closed or view.busy or not view.applied then return end
+    if view.closed then return end
+    if ev.type=='input' and ev.key=='ctrl-l' and view.dock then
+      view.prefix=nil
+      action('editor', view.selected)
+      return
+    end
+    if view.busy or not view.applied then return end
     if ev.type=='blur' or ev.type=='focus' then view.prefix=nil; return end
     if ev.type=='list_click' and ev.revision==view.applied and ev.button=='left' then
       for i,row in ipairs(view.rows_value) do

@@ -12,6 +12,10 @@ function M.setup(opts)
   backend = require(renderer == 'snacks' and 'scm.panel' or 'scm.workspace')
   backend.setup(opts)
 end
+function M.focus(side)
+  local impl = current()
+  return impl.focus and impl.focus(side) or false
+end
 function M.toggle() return current().toggle() end
 function M.handoff(fn) return current().handoff(fn) end
 return M

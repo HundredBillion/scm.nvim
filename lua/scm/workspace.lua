@@ -43,6 +43,11 @@ local function refresh(state)
     if state.again then state.again = false; refresh(state) end
   end)
 end
+function M.focus(side)
+  if side and side ~= 'left' then return false end
+  if not active or active.tab ~= vim.api.nvim_get_current_tabpage() then return false end
+  return active.view and active.view.focus and active.view:focus() or false
+end
 function M.close()
   local old = active
   active = nil
