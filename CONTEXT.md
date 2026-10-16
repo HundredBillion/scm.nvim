@@ -87,3 +87,10 @@ Recalculation of Repo Entries after relevant user activity. A Refresh targets
 one repository after lazygit exits, or all configured repositories when the
 user requests it, focus returns to Neovim, or the Panel regains focus.
 _Avoid_: rescan, reload
+
+## Standalone renderer migration (2026-10-16)
+
+The optional `auto`, `terminal`, and `sprite` renderers use `scm.workspace` with
+`scm.views` presentations and shared `scm.model` row derivation. The default
+remains the legacy Snacks panel. No core Git behavior changes. Native capability
+refusal falls back to terminal, and leaving a tab closes the standalone view.
