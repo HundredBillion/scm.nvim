@@ -29,7 +29,9 @@ switches to SVGTree when installed. Route your editor's explorer mappings throug
 `scm.handoff(function() require('svgtree').toggle() end)` to close SCM first.
 The sidebar closes when leaving its tab. It refreshes after editor writes,
 terminal exit and focus return. `width` sets terminal columns (default 36),
-`native_width` sets Sprite pixels (default 300).
+`native_width` sets Sprite pixels (default 300). `native.colors` overrides
+native list color roles such as `background` and `foreground`; omitted roles
+keep their defaults.
 
 This first standalone renderer lists pending changes and commits relative to
 the existing default-branch merge base. It does not yet include prism diffs,

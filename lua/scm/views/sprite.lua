@@ -1,15 +1,15 @@
 local M = {}
-local function description()
+local function description(opts)
   return {version=1, root={kind='virtual_list', border_side='right',
     row_height=22, font_size=13, font_family='system', icon_size=16, icon_gap=6,
     left_padding=8, right_padding=8, scrollbar_width=10, guide_visibility='hover',
     inactive_guide_opacity=0.4, scrollbar_opacity=0.4, scrollbar_hover_opacity=0.7,
     scrollbar_active_opacity=0.4,
     heading={text='SOURCE CONTROL', height=35, font_size=11, left_padding=20},
-    colors={background='#181818', foreground='#cccccc', hover='#2a2d2e',
+    colors=vim.tbl_extend('force', {background='#181818', foreground='#cccccc', hover='#2a2d2e',
       selected='#04395e', inactive_selected='#37373d', selected_foreground='#ffffff',
       focus='#0078d4', guide='#585858', inactive_guide='#585858', border='#2b2b2b',
-      scrollbar='#424242', scrollbar_hover='#646464', scrollbar_active='#bfbfbf'}}}
+      scrollbar='#424242', scrollbar_hover='#646464', scrollbar_active='#bfbfbf'}, (opts.native or {}).colors or {})}}
 end
 function M.open(opts, action, ready, failed)
   local view = {closed=false, revision=0, selected=1, rows_value={}}
@@ -118,7 +118,7 @@ function M.open(opts, action, ready, failed)
         fail({message='Sprite lacks ' .. feature}); return
       end
     end
-    sprite.open({side='left', width=opts.native_width or 300, description=description(),
+    sprite.open({side='left', width=opts.native_width or 300, description=description(opts),
       on_event=event, on_close=function(reason) fail(reason) end}, function(open_err, dock)
       if view.closed then if dock then dock:close() end; return end
       if open_err then fail(open_err); return end
