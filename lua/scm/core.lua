@@ -277,6 +277,11 @@ end
 local scopes, refresh_sequence = {}, 0
 local repo_last, repo_in_flight, repo_again = {}, {}, {}
 
+local function within(path, root)
+  return path == root or path:sub(1, #root + 1) == root .. "/" or root == "/"
+end
+
+
 -- Scoped refresh: re-scan ONE repo, deliver its fresh Repo Entry via a
 -- scheduled callback. Debounced per repo, and a request arriving while a scan
 -- for the same repo is in flight coalesces into exactly one re-run when the
@@ -297,8 +302,10 @@ function M.refresh_repo(repo, opts, cb)
   local version = refresh_sequence
   enqueue_scan(repo, opts, function(entry)
     repo_in_flight[repo] = nil
-    for _, cached in pairs(scopes) do
-      if cached.entries[repo] and version >= (cached.versions[repo] or 0) then
+    -- Discovery and initial scans may not have populated the scope yet.
+    for root, cached in pairs(scopes) do
+      local in_scope = within(repo, root) or within(root, repo)
+      if in_scope and version >= (cached.versions[repo] or 0) then
         cached.entries[repo], cached.versions[repo] = entry, version
       end
     end
@@ -312,10 +319,6 @@ function M.refresh_repo(repo, opts, cb)
     end
   end)
   return true
-end
-
-local function within(path, root)
-  return path == root or path:sub(1, #root + 1) == root .. "/" or root == "/"
 end
 
 -- Omitting request preserves the public full-discovery refresh behavior.

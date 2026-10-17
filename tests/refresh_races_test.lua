@@ -66,4 +66,28 @@ refresh({cached=true,paths={['/scope/a/file']=true}})
 finish('/scope/a','?',1)
 assert(latest.entries[1].err=='failed Git','Git error remains a Repo Entry')
 assert(branches()['/scope/new']=='new','discovery failure preserves cached membership')
-print('OK refresh races and errors')
+for _, discovery_pending in ipairs({false, true}) do
+  local root = discovery_pending and '/pending-scope' or '/initial-scope'
+  local a, b = root .. '/a', root .. '/b'
+  local discovered
+  core.discover = function(_, _, cb)
+    if discovery_pending then discovered=cb else cb({a,b}) end
+    return true
+  end
+  core.refresh(root, opts, function() end)
+  local initial_b
+  if not discovery_pending then initial_b=table.remove(pending,2) end
+  core.refresh_repo(b, opts, function(entry) assert(entry.branch=='new-b') end)
+  finish(b,'new-b')
+  if discovered then discovered({a,b}) end
+  finish(a,'initial-a')
+  if initial_b then
+    initial_b.cb({code=0,stdout='# branch.head old-b\n',stderr=''})
+    vim.wait(20,function() return false end)
+  else finish(b,'old-b') end
+  core.refresh(root, opts, function(entries, err) latest={entries=entries,err=err} end,
+    {cached=true,paths={[a .. '/file']=true}})
+  finish(a,'new-a')
+  assert(branches()[b]=='new-b', 'newer scoped result survives initial scope; discovery pending=' .. tostring(discovery_pending))
+end
+print('OK refresh races and errors, including initial scope and pending discovery')
