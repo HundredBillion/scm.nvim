@@ -256,6 +256,25 @@ local function scan_repo(repo, opts, cb)
   end)
 end
 
+local scan_queue, scans_running = {}, 0
+local function drain_scans()
+  while scans_running < 4 and #scan_queue > 0 do
+    local job = table.remove(scan_queue, 1)
+    scans_running = scans_running + 1
+    scan_repo(job.repo, job.opts, function(entry)
+      scans_running = scans_running - 1
+      job.cb(entry)
+      drain_scans()
+    end)
+  end
+end
+local function enqueue_scan(repo, opts, cb)
+  scan_queue[#scan_queue + 1] = {repo=repo, opts=opts, cb=cb}
+  drain_scans()
+end
+
+-- Request order protects cached entries from older scans that finish after newer scans.
+local scopes, refresh_sequence = {}, 0
 local repo_last, repo_in_flight, repo_again = {}, {}, {}
 
 -- Scoped refresh: re-scan ONE repo, deliver its fresh Repo Entry via a
@@ -274,8 +293,15 @@ function M.refresh_repo(repo, opts, cb)
   end
   repo_in_flight[repo] = true
   repo_last[repo] = now
-  scan_repo(repo, opts, function(entry)
+  refresh_sequence = refresh_sequence + 1
+  local version = refresh_sequence
+  enqueue_scan(repo, opts, function(entry)
     repo_in_flight[repo] = nil
+    for _, cached in pairs(scopes) do
+      if cached.entries[repo] and version >= (cached.versions[repo] or 0) then
+        cached.entries[repo], cached.versions[repo] = entry, version
+      end
+    end
     cb(entry)
     if repo_again[repo] then
       repo_again[repo] = nil
@@ -288,28 +314,73 @@ function M.refresh_repo(repo, opts, cb)
   return true
 end
 
-function M.refresh(root, opts, cb)
-  return M.discover(root, opts, function(repos, discover_err)
-    if discover_err then
-      cb(nil, discover_err)
-      return
+local function within(path, root)
+  return path == root or path:sub(1, #root + 1) == root .. "/" or root == "/"
+end
+
+-- Omitting request preserves the public full-discovery refresh behavior.
+-- Renderers pass cached=true and optional paths to reuse discovery for ordinary editor events.
+function M.refresh(root, opts, cb, request)
+  root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
+  local cached = scopes[root]
+  if not cached then
+    cached = {entries={}, versions={}, membership_version=0}
+    scopes[root] = cached
+  end
+  refresh_sequence = refresh_sequence + 1
+  local version = refresh_sequence
+  local targets = {}
+  local discover = not request or not request.cached or not cached.repos
+  if not discover and request.paths then
+    for path in pairs(request.paths) do
+      path = vim.fs.normalize(vim.uv.fs_realpath(path) or path)
+      local containing
+      for _, repo in ipairs(cached.repos) do
+        if within(path, repo) and (not containing or #repo > #containing) then containing = repo end
+      end
+      if containing then targets[containing] = true
+      elseif within(path, root) then discover = true end
     end
-    if #repos == 0 then
-      cb({}, nil)
-      return
+  end
+  local function collect(repos, err)
+    if err then cb(nil, err); return end
+    if discover and version >= cached.membership_version then
+      cached.repos, cached.membership_version = repos, version
     end
-    local entries, pending = {}, #repos
-    for i, repo in ipairs(repos) do
-      scan_repo(repo, opts, function(entry)
-        entries[i] = entry
-        pending = pending - 1
-        if pending == 0 then
-          table.sort(entries, M.compare_entries)
-          cb(entries, nil)
+    local snapshot = {}
+    for _, repo in ipairs(repos) do
+      snapshot[repo] = cached.entries[repo]
+    end
+    local selected = {}
+    for _, repo in ipairs(repos) do
+      if discover or not request.paths or targets[repo] or not snapshot[repo] then
+        selected[#selected + 1] = repo
+      end
+    end
+    local pending = #selected
+    local function publish()
+      local entries = {}
+      for _, repo in ipairs(repos) do
+        entries[#entries + 1] = cached.entries[repo] or snapshot[repo]
+      end
+      table.sort(entries, M.compare_entries)
+      cb(entries, nil)
+    end
+    if pending == 0 then publish(); return end
+    for _, repo in ipairs(selected) do
+      enqueue_scan(repo, opts, function(entry)
+        snapshot[repo] = entry
+        if version >= (cached.versions[repo] or 0) then
+          cached.entries[repo], cached.versions[repo] = entry, version
         end
+        pending = pending - 1
+        if pending == 0 then publish() end
       end)
     end
-  end)
+  end
+  if discover then return M.discover(root, opts, collect) end
+  collect(cached.repos)
+  return true
 end
 
 return M

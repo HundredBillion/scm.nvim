@@ -353,6 +353,8 @@ end
 
 local function run_full_refresh(tab, state)
   local generation, root = state.generation, state.queued_root
+  local request = state.queued_request
+  state.queued_request = nil
   state.queued_root = nil
   state.refreshing = true
   local picker = picker_for_tab(tab)
@@ -371,10 +373,10 @@ local function run_full_refresh(tab, state)
       end
     end
     if state.queued_root and vim.api.nvim_tabpage_is_valid(tab) then run_full_refresh(tab, state) end
-  end)
+  end, request)
 end
 
-function M.refresh_view(picker)
+function M.refresh_view(picker, request)
   picker = picker or Snacks.picker.get({ source = "scm" })[1]
   if not picker then return false end
   local tab = picker._scm_tab or vim.api.nvim_get_current_tabpage()
@@ -385,6 +387,7 @@ function M.refresh_view(picker)
   end
   state.generation = state.generation + 1
   state.queued_root = state.root
+  state.queued_request = require("scm.refresh").merge(state.queued_request, request or {cached=false})
   set_title(picker, "Source Control (scanning…)")
   if state.refreshing then return false end
   run_full_refresh(tab, state)

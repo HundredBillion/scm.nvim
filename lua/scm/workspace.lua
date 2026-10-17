@@ -31,17 +31,28 @@ local function render(state, keep_index)
   state.selected = math.max(1, math.min(state.selected, #rows))
   state.view:render(rows, state.selected)
 end
-local function refresh(state)
+local policy = require('scm.refresh')
+local function refresh(state, request)
   if active ~= state then return end
-  if state.scanning then state.again = true; return end
-  state.scanning = true
-  core.refresh(state.root, options, function(entries, err)
-    if active ~= state then return end
-    state.scanning = false
-    state.entries, state.error = entries or {}, err
-    render(state)
-    if state.again then state.again = false; refresh(state) end
-  end)
+  request = request or {cached=false}
+  state.pending_refresh = policy.merge(state.pending_refresh, request)
+  state.generation = (state.generation or 0) + 1
+  if state.scanning then return end
+  local function run()
+    local pending, generation = state.pending_refresh, state.generation
+    state.pending_refresh, state.scanning = nil, true
+    core.refresh(state.root, options, function(entries, err)
+      if active ~= state then return end
+      state.scanning = false
+      if generation == state.generation then
+        if not err then state.entries = entries end
+        state.error = err
+        render(state)
+      end
+      if state.pending_refresh then run() end
+    end, pending)
+  end
+  run()
 end
 function M.focus(side)
   if side and side ~= 'left' then return false end
@@ -155,8 +166,18 @@ function M.setup(opts)
   highlights()
   local group = vim.api.nvim_create_augroup('ScmWorkspace', {clear=true})
   vim.api.nvim_create_autocmd('ColorScheme', {group=group, callback=highlights})
-  vim.api.nvim_create_autocmd({'BufWritePost','FocusGained','TermClose'}, {group=group, callback=function()
-    if active then refresh(active) end
+  vim.api.nvim_create_autocmd({'BufWritePost','FocusGained','TermClose'}, {group=group, callback=function(ev)
+    local state = active
+    if not state then return end
+    local request = {cached=true}
+    if ev.event == 'BufWritePost' then request.paths = {[vim.api.nvim_buf_get_name(ev.buf)]=true} end
+    if ev.event == 'TermClose' then
+      local name = vim.api.nvim_buf_get_name(ev.buf)
+      if not name:find('lazygit', 1, true) then return end
+      local cwd = name:match('^term://(.-)//')
+      if cwd then request.paths = {[vim.fn.expand(cwd)]=true} end
+    end
+    policy.event(state, options, request, function(pending) refresh(state, pending) end)
   end})
   vim.api.nvim_create_autocmd('TabLeave', {group=group, callback=M.close})
   vim.api.nvim_create_user_command('ScmToggle', M.toggle, {force=true})
