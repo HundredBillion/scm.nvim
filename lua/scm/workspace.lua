@@ -95,6 +95,7 @@ local function action(state, name, index)
   elseif name == 'editor' then editor(state)
   elseif name == 'refresh' then refresh(state)
   elseif name == 'explorer' then
+    if options.on_explorer then options.on_explorer(state.root); return end
     local ok, tree = pcall(require, 'svgtree')
     if ok then M.handoff(function() tree.open(state.root) end)
     else vim.notify('SCM: SVGTree is not installed', vim.log.levels.INFO) end

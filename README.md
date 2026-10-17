@@ -94,3 +94,9 @@ and to `scm.toggle()` in the opposite direction. A direct command such as
 `Snacks.explorer()`, `:Neotree`, or a standalone SVGTree command bypasses SCM,
 so SCM cannot guarantee mutual exclusion for that invocation. SVGTree remains
 optional; `scm.nvim` does not depend on it or patch its internals.
+
+For `auto`, `sprite`, and `terminal` renderers, an optional
+`on_explorer = function(root) ... end` setup callback lets a host coordinate the
+Explorer action. The callback receives the SCM root and owns closing SCM and
+opening Explorer (use `require('scm').handoff(...)` for deferred replacement).
+Without it, the action hands off to SVGTree when installed.
