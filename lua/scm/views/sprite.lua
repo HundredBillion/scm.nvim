@@ -67,7 +67,7 @@ function M.open(opts, action, ready, failed)
         if #target_rows>0 then
           view.pending={rows=target_rows, index=index}
         end
-      elseif view.queued_activation then
+      elseif view.queued_activation and not view.pending then
         view.queued_activation=nil
         if view.rows_value[view.selected] then action('open', view.selected) end
       end

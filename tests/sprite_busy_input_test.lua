@@ -56,10 +56,24 @@ assert(
 )
 request.on_event({ type = "list_click", revision = 1, button = "left", id = "first" })
 assert(#actions == 1, "stale list revisions remain ignored")
+
+local newest_rows = { { id = "newest", text = "Newest" } }
 view:render(rows, 1)
-local late_ack = row_callbacks[3]
+request.on_event({ type = "input", key = "enter", text = "\n" })
+view:render(newest_rows, 1)
+row_callbacks[3].done()
+assert(#actions == 1, "activation waits for rows already pending behind the acknowledged revision")
+assert(row_callbacks[4].revision == 4 and row_callbacks[4].selected == "newest")
+row_callbacks[4].done()
+assert(
+	#actions == 2 and actions[2].name == "open" and actions[2].index == 1,
+	"activation runs after the newer pending row revision is acknowledged"
+)
+
+view:render(rows, 1)
+local late_ack = row_callbacks[5]
 view:close()
 late_ack.done()
 request.on_event({ type = "input", key = "enter", text = "\n" })
-assert(#actions == 1, "closed views ignore later input")
+assert(#actions == 2, "closed views ignore later input")
 print("OK sprite busy input")
