@@ -21,7 +21,6 @@ function M.open(opts, action, ready, failed)
   function view:close()
     if self.closed then return end
     self.closed=true
-    if self.cancel then self.cancel() end
     if self.dock then self.dock:close() end
   end
   function view:selection() return self.selected end
@@ -48,7 +47,7 @@ function M.open(opts, action, ready, failed)
       rows[i]={id=row.id, text=row.text, indent=0, guides={}}
     end
     view.dock:rows(revision, rows, rows[next_rows.index] and rows[next_rows.index].id, function(err)
-      if view.closed then return end
+      if view.closed or revision~=view.revision then return end
       view.busy=false
       if err then fail(err); return end
       view.rows_value=next_rows.rows
@@ -57,6 +56,20 @@ function M.open(opts, action, ready, failed)
       if not view.focused then
         view.focused=true
         view.dock:focus(function(e) if e then fail(e) end end)
+      end
+      local delta=view.queued_delta or 0
+      if delta~=0 and #(view.pending and view.pending.rows or view.rows_value)>0 then
+        local pending=view.pending
+        local target_rows=pending and pending.rows or view.rows_value
+        local index=pending and pending.index or view.selected
+        view.queued_delta=0
+        index=math.max(1, math.min(#target_rows, index+delta))
+        if #target_rows>0 then
+          view.pending={rows=target_rows, index=index}
+        end
+      elseif view.queued_activation then
+        view.queued_activation=nil
+        if view.rows_value[view.selected] then action('open', view.selected) end
       end
       flush()
     end)
@@ -72,7 +85,20 @@ function M.open(opts, action, ready, failed)
       action('editor', view.selected)
       return
     end
-    if view.busy or not view.applied then return end
+    if view.busy then
+      if ev.type=='input' then
+        local key=ev.key
+        if key=='j' or key=='down' or key=='<Down>' then
+          view.queued_delta=(view.queued_delta or 0)+1
+        elseif key=='k' or key=='up' or key=='<Up>' then
+          view.queued_delta=(view.queued_delta or 0)-1
+        elseif key=='enter' or key=='return' or key=='<CR>' or key=='<Return>' then
+          view.queued_activation='open'
+        end
+      end
+      return
+    end
+    if not view.applied then return end
     if ev.type=='blur' or ev.type=='focus' then view.prefix=nil; return end
     if ev.type=='list_click' and ev.revision==view.applied and ev.button=='left' then
       for i,row in ipairs(view.rows_value) do
@@ -109,25 +135,15 @@ function M.open(opts, action, ready, failed)
   end
   local ok, sprite = pcall(require,'sprite')
   if not ok then fail({message='Sprite API is unavailable'}); return view end
-  view.cancel=sprite.available(function(err, capabilities)
-    if view.closed then return end
-    if err or not capabilities then fail(err or {message='Sprite unavailable'}); return end
-    for _, feature in ipairs({'owned-dock-v1','virtual-list-v1'}) do
-      local features=capabilities.features or {}
-      if not features[feature] and not vim.tbl_contains(features, feature) then
-        fail({message='Sprite lacks ' .. feature}); return
-      end
-    end
-    sprite.open({side='left', width=opts.native_width or 300, description=description(opts),
-      on_event=event, on_close=function(reason) fail(reason) end}, function(open_err, dock)
-      if view.closed then if dock then dock:close() end; return end
-      if open_err then fail(open_err); return end
-      view.dock=dock
-      dock:assets({}, function(asset_err)
-        if view.closed then return end
-        if asset_err then fail(asset_err); return end
-        ready(view)
-      end)
+  sprite.open({side='left', width=opts.native_width or 300, description=description(opts),
+    on_event=event, on_close=function(reason) fail(reason) end}, function(open_err, dock)
+    if view.closed then if dock then dock:close() end; return end
+    if open_err then fail(open_err); return end
+    view.dock=dock
+    dock:assets({}, function(asset_err)
+      if view.closed then return end
+      if asset_err then fail(asset_err); return end
+      ready(view)
     end)
   end)
   return view

@@ -1,10 +1,9 @@
 vim.opt.runtimepath:prepend(vim.uv.cwd())
-local pending, request, dock, fail
+local request, dock, fail
 local row_callbacks = {}
 local renders, closed = 0, 0
 local focused, editor_focused = 0, 0
 package.loaded.sprite = {
-  available=function(cb) pending=cb end,
   open=function(opts, cb)
     request=opts
     dock={
@@ -29,8 +28,6 @@ vim.cmd.cd(fixture)
 local scm = require('scm')
 scm.setup({renderer='auto',native={colors={background='#2b2d30'}}})
 scm.toggle()
-assert(pending, 'auto checks Sprite capabilities')
-pending(nil, {features={'owned-dock-v1','virtual-list-v1'}})
 assert(request and request.description.root.heading.text=='SOURCE CONTROL', 'native source control dock opens')
 assert(request.description.root.colors.background=='#2b2d30', 'native palette override')
 assert(renders==1, 'initial native rows sent')
@@ -55,13 +52,10 @@ assert(closed==1, 'close releases native dock')
 row_callbacks[1]()
 assert(renders==before_close, 'late row ack does not resurrect closed dock')
 scm.toggle()
-local late=pending
 scm.toggle()
-late(nil, {features={'owned-dock-v1','virtual-list-v1'}})
-assert(closed==1, 'late discovery does not open a dock')
+assert(closed==2, 'opening again closes the previous dock')
 fail=true
 scm.toggle()
-pending(nil, {features={'owned-dock-v1','virtual-list-v1'}})
 local found=false
 for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
   if vim.bo[vim.api.nvim_win_get_buf(win)].filetype=='scm' then found=true end
