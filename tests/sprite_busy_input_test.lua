@@ -70,10 +70,23 @@ assert(
 	"activation runs after the newer pending row revision is acknowledged"
 )
 
+view:render({}, 1)
+request.on_event({ type = "input", key = "enter", text = "\n" })
+local restored_rows = { { id = "restored", text = "Restored" } }
+view:render(restored_rows, 1)
+row_callbacks[5].done()
+assert(#actions == 2, "activation survives an empty acknowledgement while populated rows are pending")
+assert(row_callbacks[6].revision == 6 and row_callbacks[6].selected == "restored")
+row_callbacks[6].done()
+assert(
+	#actions == 3 and actions[3].name == "open" and actions[3].index == 1,
+	"activation runs after the populated row revision is acknowledged"
+)
+
 view:render(rows, 1)
-local late_ack = row_callbacks[5]
+local late_ack = row_callbacks[7]
 view:close()
 late_ack.done()
 request.on_event({ type = "input", key = "enter", text = "\n" })
-assert(#actions == 2, "closed views ignore later input")
+assert(#actions == 3, "closed views ignore later input")
 print("OK sprite busy input")
