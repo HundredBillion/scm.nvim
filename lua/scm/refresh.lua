@@ -1,24 +1,32 @@
--- scm.refresh — event triggers that keep the panel current without polling.
--- Sits between editor events and the panel's two refresh entrypoints (scoped
--- per-repo refresh, full rescan) and owns the full-rescan debounce, so event
--- storms (focus bouncing, doubled autocmds) never stack git processes.
---
--- Triggers:
---   * TermClose on any lazygit terminal — panel-launched or opened by hand in
---     any :terminal — refreshes just the repo that lazygit ran in.
---   * WinEnter on the panel's own windows — debounced full rescan, the
---     safety net for changes made while the user was elsewhere in Neovim.
---   * FocusGained (Neovim regains OS focus) — debounced full rescan, catches
---     commits made from other terminals/apps while Neovim was backgrounded.
+-- Shared event batching for renderers and legacy Panel event adapters.
+-- Save bursts retain every affected path; focus and explicit refresh requests cover the whole scope.
 local M = {}
+
+function M.merge(previous, request)
+  if not previous then return request end
+  if not previous.cached or not request.cached then return {cached=false} end
+  if not previous.paths or not request.paths then return {cached=true} end
+  local paths = vim.tbl_extend("force", previous.paths, request.paths)
+  return {cached=true, paths=paths}
+end
+
+function M.event(owner, options, request, callback)
+  owner.pending_event = M.merge(owner.pending_event, request)
+  if owner.event_scheduled then return end
+  owner.event_scheduled = true
+  vim.defer_fn(function()
+    local pending = owner.pending_event
+    owner.pending_event, owner.event_scheduled = nil, false
+    callback(pending)
+  end, options.repo_debounce_ms or 150)
+end
 
 local function opts()
   local panel = require("scm.panel")
   return panel.state.opts or require("scm.core").defaults
 end
 
--- Full Refresh, debounced for the current tab. The Panel no-ops while closed
--- and coalesces overlapping requests independently for each tab.
+-- Legacy focus refreshes are throttled independently for each tab.
 function M.full()
   local now = vim.uv.now()
   local previous = vim.t.scm_last_full
@@ -26,7 +34,7 @@ function M.full()
     return
   end
   vim.t.scm_last_full = now
-  require("scm.panel").refresh_view()
+  require("scm.panel").refresh_view(nil, {cached=true})
 end
 
 -- A lazygit terminal exited. Terminal buffer names look like
@@ -64,6 +72,19 @@ end
 
 function M.setup()
   local aug = vim.api.nvim_create_augroup("ScmRefreshTriggers", { clear = true })
+
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = aug,
+    callback = function(ev)
+      if not _G.Snacks then return end
+      local panel = require("scm.panel")
+      local picker = Snacks.picker.get({source="scm"})[1]
+      if not picker then return end
+      M.event(picker, opts(), {cached=true, paths={[vim.api.nvim_buf_get_name(ev.buf)]=true}}, function(request)
+        if not picker.closed then panel.refresh_view(picker, request) end
+      end)
+    end,
+  })
 
   vim.api.nvim_create_autocmd("TermClose", {
     group = aug,

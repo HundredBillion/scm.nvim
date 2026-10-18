@@ -84,6 +84,27 @@ _Avoid_: partially staged, dirty-staged
 
 **Refresh**:
 Recalculation of Repo Entries after relevant user activity. A Refresh targets
-one repository after lazygit exits, or all configured repositories when the
-user requests it, focus returns to Neovim, or the Panel regains focus.
+the containing repository after a save or lazygit exits, or all discovered
+repositories when the user requests it, focus returns to Neovim, or the Panel
+regains focus. Ordinary events reuse discovery for the Explorer Root; an
+explicit Refresh, opening the Panel, or a save under an unknown repository
+rediscovers repository membership.
 _Avoid_: rescan, reload
+
+## Standalone renderer migration (2026-10-16)
+
+The optional `auto`, `terminal`, and `sprite` renderers use `scm.workspace` with
+`scm.views` presentations and shared `scm.model` row derivation. The default
+remains the legacy Snacks panel. No core Git behavior changes. Native capability
+refusal falls back to terminal, and leaving a tab closes the standalone view.
+
+## Scoped refresh scheduling (2026-10-16)
+
+Core caches discovery by normalized Explorer Root and limits repository scans
+across callers to four at once. Refresh events share burst coalescing and request
+merging in `scm.refresh`; renderers retain lifecycle/generation guards and consume
+Repo Entries. Cache membership and entries carry request versions so older
+callbacks cannot replace newer cached results. Comparison Base calculations
+still run for each selected repository; they are not cached independently.
+A new nested repository inside an already known repository is discovered by
+explicit Refresh or reopening the Panel.
