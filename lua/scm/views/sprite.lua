@@ -80,6 +80,23 @@ function M.open(opts, action, ready, failed)
   end
   local function event(ev)
     if view.closed then return end
+    if ev.type=='blur' or ev.type=='focus' then view.prefix=nil; return end
+    local key
+    if ev.type=='input' then
+      local named={enter='<CR>', escape='<Esc>', up='<Up>', down='<Down>',
+        ['ctrl-b']='<C-b>', ['ctrl-shift-g']='<C-S-g>', space=' '}
+      key=named[ev.key] or (ev.text and not ev.text:find('%c') and ev.text) or ev.key
+      local now=vim.uv.now()
+      if view.prefix and now-view.prefix_at > vim.o.timeoutlen then view.prefix=nil end
+      if key==' ' then view.prefix=' '; view.prefix_at=now; return end
+      if view.prefix then
+        key=view.prefix .. key
+        view.prefix=nil
+        if key==' g' or key==' a' then view.prefix=key; view.prefix_at=now; return end
+      end
+      local mapping=((opts.native or {}).mappings or {})[key]
+      if mapping then mapping(); return end
+    end
     if ev.type=='input' and ev.key=='ctrl-l' and view.dock then
       view.prefix=nil
       action('editor', view.selected)
@@ -99,7 +116,6 @@ function M.open(opts, action, ready, failed)
       return
     end
     if not view.applied then return end
-    if ev.type=='blur' or ev.type=='focus' then view.prefix=nil; return end
     if ev.type=='list_click' and ev.revision==view.applied and ev.button=='left' then
       for i,row in ipairs(view.rows_value) do
         if row.id==ev.id then
@@ -109,18 +125,6 @@ function M.open(opts, action, ready, failed)
         end
       end
     elseif ev.type=='input' then
-      local key=ev.key
-      local named={enter='<CR>', escape='<Esc>', up='<Up>', down='<Down>',
-        ['ctrl-b']='<C-b>', ['ctrl-shift-g']='<C-S-g>', space=' '}
-      key=named[key] or (ev.text and not ev.text:find('%c') and ev.text) or key
-      local now=vim.uv.now()
-      if view.prefix and now-view.prefix_at > vim.o.timeoutlen then view.prefix=nil end
-      if key==' ' then view.prefix=' '; view.prefix_at=now; return end
-      if view.prefix then
-        key=view.prefix .. key
-        view.prefix=nil
-        if key==' g' then view.prefix=key; view.prefix_at=now; return end
-      end
       if key=='j' or key=='<Down>' or key=='k' or key=='<Up>' then
         local delta=(key=='j' or key=='<Down>') and 1 or -1
         view.selected=math.max(1, math.min(#view.rows_value, view.selected+delta))
