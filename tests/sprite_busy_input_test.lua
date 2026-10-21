@@ -32,7 +32,8 @@ package.loaded.sprite = {
 local sprite_view = require("scm.views.sprite")
 local opened
 local failed
-local view = sprite_view.open({}, function(name, index)
+local follow_toggles = 0
+local view = sprite_view.open({ native = { mappings = { [' af'] = function() follow_toggles = follow_toggles + 1 end } } }, function(name, index)
 	actions[#actions + 1] = { name = name, index = index }
 end, function(value)
 	opened = value
@@ -46,10 +47,18 @@ view:render(rows, 1)
 assert(#row_callbacks == 1 and row_callbacks[1].revision == 1)
 request.on_event({ type = "input", key = "down" })
 request.on_event({ type = "input", key = "enter", text = "\n" })
+for _, key in ipairs({ 'space', 'a', 'f' }) do
+	request.on_event({ type = 'input', key = key, text = key == 'space' and ' ' or key })
+end
+assert(follow_toggles == 1, 'Follow shortcut works while SCM is refreshing')
 row_callbacks[1].done()
 assert(#row_callbacks == 2, "queued navigation renders the intended selection after its ack")
 assert(row_callbacks[2].revision == 2 and row_callbacks[2].selected == "second")
 row_callbacks[2].done()
+for _, key in ipairs({ 'space', 'a', 'f' }) do
+	request.on_event({ type = 'input', key = key, text = key == 'space' and ' ' or key })
+end
+assert(follow_toggles == 2, 'native panel runs configured Follow shortcut')
 assert(
 	#actions == 1 and actions[1].name == "open" and actions[1].index == 2,
 	"queued activation opens the row selected by navigation"
