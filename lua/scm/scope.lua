@@ -75,25 +75,27 @@ local function neotree_root()
   return state.path
 end
 
-function M.establish()
+-- The root establish() would pick, without remembering it on the tab.
+function M.candidate()
   local remembered = normalize(vim.t[KEY])
   if remembered then
     return remembered
   end
-  vim.t[KEY] = nil
-  local root
   if _G.LazyVim and LazyVim.root then
     local ok, value = pcall(LazyVim.root)
-    if ok then
-      root = value
+    local root = ok and normalize(value)
+    if root then
+      return root
     end
   end
-  local established = M.remember(root)
-  if established then
-    return established
+  return normalize(vim.fn.getcwd())
+end
+
+function M.establish()
+  if not normalize(vim.t[KEY]) then
+    vim.t[KEY] = nil
   end
-  established = M.remember(vim.fn.getcwd())
-  return established
+  return M.remember(M.candidate())
 end
 
 function M.current()

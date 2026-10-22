@@ -11,6 +11,8 @@ M.defaults = {
   -- Minimum ms between two refreshes of the SAME repo (event storms from
   -- autocmds must never stack git processes for one repo).
   repo_debounce_ms = 150,
+  -- Scan the Explorer Root once after startup so the first open already has rows.
+  warm = true,
   -- Minimum ms between two full multi-repo rescans triggered by focus events.
   focus_debounce_ms = 1500,
   -- Directory names discovery never descends into. Build output and dependency
@@ -455,6 +457,17 @@ function M.cached(root)
   end
   table.sort(entries, M.compare_entries)
   return entries
+end
+
+-- Refresh root in the background unless a refresh of it has already started, so a
+-- warm-up never queues duplicate scans ahead of the ones a just-opened Panel is waiting on.
+-- Returns true when it started one. A failure is dropped; the next open reports it.
+function M.warm(root, opts)
+  root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
+  if scopes[root] then
+    return false
+  end
+  return M.refresh(root, opts, function() end)
 end
 
 -- Omitting request preserves the public full-discovery refresh behavior.

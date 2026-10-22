@@ -46,6 +46,7 @@ function M.setup(opts)
   -- Event triggers (lazygit exits, focus) live in their own module; requiring
   -- it here (not at the top) avoids a load-time require cycle.
   require("scm.refresh").setup()
+  require("scm.refresh").warm(M.state.opts)
 end
 
 -- The sidebar layout gives the list window border = "none" (no titlebar to

@@ -177,5 +177,6 @@ function M.setup(opts)
   end})
   vim.api.nvim_create_autocmd('TabLeave', {group=group, callback=M.close})
   vim.api.nvim_create_user_command('ScmToggle', M.toggle, {force=true})
+  policy.warm(options)
 end
 return M

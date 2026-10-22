@@ -104,6 +104,22 @@ local function on_lazygit_close(bufname)
   )
 end
 
+-- Warm-up for every renderer: once startup is over, scan the root SCM would open on.
+-- Deferred so a Panel opened in the same tick (a lazy load on the key) starts first and the
+-- warm-up then skips its root.
+function M.warm(options)
+  if options.warm == false then return end
+  local function run()
+    local root = require("scm.scope").candidate()
+    if root then require("scm.core").warm(root, options) end
+  end
+  if vim.v.vim_did_enter == 1 then
+    vim.defer_fn(run, 0)
+  else
+    vim.api.nvim_create_autocmd("VimEnter", { once = true, callback = function() vim.defer_fn(run, 0) end })
+  end
+end
+
 -- True when the current window is one of the SCM panel's own windows.
 local function in_panel_win(picker)
   local win = vim.api.nvim_get_current_win()
