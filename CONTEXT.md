@@ -102,9 +102,20 @@ refusal falls back to terminal, and leaving a tab closes the standalone view.
 
 Core caches discovery by normalized Explorer Root and limits repository scans
 across callers to four at once. Refresh events share burst coalescing and request
-merging in `scm.refresh`; renderers retain lifecycle/generation guards and consume
-Repo Entries. Cache membership and entries carry request versions so older
+merging in `scm.refresh`, which also owns refresh ordering for every renderer:
+one Core run per view at a time, one merged re-run for requests made meanwhile,
+and delivery of only the newest result. Renderers are adapters that render the
+delivered Repo Entries or error. Cache membership and entries carry request versions so older
 callbacks cannot replace newer cached results. Comparison Base calculations
 still run for each selected repository; they are not cached independently.
 A new nested repository inside an already known repository is discovered by
 explicit Refresh or reopening the Panel.
+
+## Bounded discovery (2026-10-22)
+
+Discovery skips directories named in `discovery_exclude` (build output and
+dependency trees such as `target` and `node_modules`) below the Explorer Root,
+so it finishes within `discovery_timeout_ms` (15 s by default, separate from
+the per-repository `timeout_ms`) on large trees. Repositories inside an
+excluded directory are not Repo Entries. A discovery that fails or times out is
+an error, never a partial repository list.

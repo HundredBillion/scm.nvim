@@ -4,12 +4,41 @@ local M = {}
 
 M.defaults = {
   timeout_ms = 5000,
+  -- Limit for the repository-discovery walk alone. Large roots of real source
+  -- trees still take several seconds after exclusions, so this is longer than
+  -- timeout_ms, which bounds each per-repo git command.
+  discovery_timeout_ms = 15000,
   -- Minimum ms between two refreshes of the SAME repo (event storms from
   -- autocmds must never stack git processes for one repo).
   repo_debounce_ms = 150,
   -- Minimum ms between two full multi-repo rescans triggered by focus events.
   focus_debounce_ms = 1500,
+  -- Directory names discovery never descends into. Build output and dependency
+  -- trees can hold millions of files and would push the walk past discovery_timeout_ms.
+  -- A list given in setup replaces this one; {} searches everything.
+  discovery_exclude = {
+    "node_modules", "target", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache",
+    ".pytest_cache", ".gradle", ".next", ".terraform", ".zig-cache", "zig-cache", "DerivedData",
+  },
 }
+
+-- find arguments: skip excluded directory names below the root, then stop at each
+-- .git entry (a directory, or a worktree's .git file) and print it.
+local function find_args(root, exclude)
+  local args = { "find", root, "-mindepth", "1" }
+  if #exclude > 0 then
+    vim.list_extend(args, { "-type", "d", "(" })
+    for i, name in ipairs(exclude) do
+      if i > 1 then
+        args[#args + 1] = "-o"
+      end
+      vim.list_extend(args, { "-name", name })
+    end
+    vim.list_extend(args, { ")", "-prune", "-o" })
+  end
+  vim.list_extend(args, { "-name", ".git", "-prune", "-print" })
+  return args
+end
 
 -- Parse `git status --porcelain=v2 --branch` output into branch/ahead/behind
 -- plus File Entries carrying the raw XY Code verbatim.
@@ -114,6 +143,15 @@ function M.discover(root, opts, cb)
     end
     vim.schedule(function()
       if landed.find.code ~= 0 then
+        -- vim.system reports a killed-on-timeout process as exit code 124.
+        if landed.find.code == 124 then
+          local limit = opts.discovery_timeout_ms or M.defaults.discovery_timeout_ms
+          cb(nil, string.format(
+            "repository discovery timed out after %g s; add large folders to discovery_exclude",
+            limit / 1000
+          ))
+          return
+        end
         local msg = vim.trim(landed.find.stderr or "")
         cb(nil, msg ~= "" and msg or "repository discovery failed")
         return
@@ -144,8 +182,8 @@ function M.discover(root, opts, cb)
     end
   )
   vim.system(
-    { "find", root, "-name", ".git", "-prune", "-print" },
-    { text = true, timeout = opts.timeout_ms },
+    find_args(root, opts.discovery_exclude or M.defaults.discovery_exclude),
+    { text = true, timeout = opts.discovery_timeout_ms or M.defaults.discovery_timeout_ms },
     function(out)
       finish("find", out)
     end
