@@ -143,6 +143,15 @@ function M.discover(root, opts, cb)
     end
     vim.schedule(function()
       if landed.find.code ~= 0 then
+        -- vim.system reports a killed-on-timeout process as exit code 124.
+        if landed.find.code == 124 then
+          local limit = opts.discovery_timeout_ms or M.defaults.discovery_timeout_ms
+          cb(nil, string.format(
+            "repository discovery timed out after %g s; add large folders to discovery_exclude",
+            limit / 1000
+          ))
+          return
+        end
         local msg = vim.trim(landed.find.stderr or "")
         cb(nil, msg ~= "" and msg or "repository discovery failed")
         return

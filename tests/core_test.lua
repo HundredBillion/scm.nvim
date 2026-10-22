@@ -179,7 +179,25 @@ end
 local timed_out_repos, timed_out_err = discover_now(heavy, { timeout_ms = 5000 })
 vim.system = real_system
 eq(timed_out_repos, nil, "timed-out discovery delivers no partial repository list")
-assert(type(timed_out_err) == "string" and timed_out_err ~= "", "timed-out discovery reports an error")
+eq(
+  timed_out_err,
+  "repository discovery timed out after 15 s; add large folders to discovery_exclude",
+  "timed-out discovery says it timed out and how to fix it"
+)
+
+-- A find that fails without stderr still reports a generic error.
+vim.system = function(cmd, opts, cb)
+  if cmd[1] == "find" then
+    vim.schedule(function()
+      cb({ code = 1, signal = 0, stdout = "", stderr = "" })
+    end)
+    return
+  end
+  return real_system(cmd, opts, cb)
+end
+local _, failed_err = discover_now(heavy, { timeout_ms = 5000 })
+vim.system = real_system
+eq(failed_err, "repository discovery failed", "non-timeout failure keeps the generic error")
 
 -- The find walk gets its own, longer limit; per-repo git commands keep timeout_ms.
 local function timeouts_for(opts)
