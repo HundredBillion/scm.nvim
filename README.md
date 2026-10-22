@@ -39,6 +39,30 @@ PR-target lookup, CRP, agent following, automatic filesystem watching, staging,
 or the legacy Snacks fuzzy picker/lazygit actions. Deleted files are listed;
 opening their historical contents awaits prism integration.
 
+## Repository discovery
+
+SCM finds repositories by walking the Explorer root for `.git` entries. The
+walk skips build output and dependency directories by name so it finishes
+within `timeout_ms` (default 5000) on large trees. The default
+`discovery_exclude` list is `node_modules`, `target`, `.venv`, `venv`,
+`__pycache__`, `.tox`, `.mypy_cache`, `.pytest_cache`, `.gradle`, `.next`,
+`.terraform`, `.zig-cache`, `zig-cache` and `DerivedData`. A directory with one
+of these names is skipped entirely, so repositories inside it, or a repository
+that itself has one of these names, are not listed. The Explorer root itself is
+always searched, even when its own name is in the list.
+
+A list you pass replaces the default; `{}` searches everything:
+
+```lua
+opts = {
+  discovery_exclude = { "node_modules", "target", "vendor" },
+}
+```
+
+If discovery still exceeds `timeout_ms`, SCM shows an error rather than a
+partial list. Add the heavy directory names to `discovery_exclude` or raise
+`timeout_ms`.
+
 ## Legacy Snacks install
 
 ```lua

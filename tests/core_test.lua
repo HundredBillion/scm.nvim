@@ -122,6 +122,65 @@ vim.wait(5000, function()
 end, 10)
 assert(type(missing_err) == "string" and missing_err ~= "", "discovery failures are reported")
 
+local function discover_now(dir, opts)
+  local repos, err, done
+  core.discover(dir, opts, function(r, e)
+    repos, err, done = r, e, true
+  end)
+  vim.wait(5000, function()
+    return done
+  end, 10)
+  assert(done, "discovery finished for " .. dir)
+  return repos, err
+end
+
+-- discover(): build and dependency trees are pruned; other nested repos are found.
+local heavy = vim.fn.tempname()
+local function repo_at(path)
+  vim.fn.mkdir(path, "p")
+  sh({ "git", "-C", path, "init", "-q", "-b", "main" })
+  return (assert(vim.uv.fs_realpath(path), "canonical " .. path))
+end
+local heavy_app = repo_at(heavy .. "/app")
+local heavy_lib = repo_at(heavy .. "/libs/deep/lib")
+local heavy_custom = repo_at(heavy .. "/generated/inner")
+repo_at(heavy .. "/app/node_modules/dep")
+repo_at(heavy .. "/rust/target/debug/build/vendored")
+repo_at(heavy .. "/py/.venv/src/pkg")
+vim.fn.mkdir(heavy .. "/rust/target/release", "p")
+vim.fn.writefile({ "gitdir: /elsewhere" }, heavy .. "/rust/target/release/.git")
+local heavy_repos, heavy_err = discover_now(heavy, { timeout_ms = 5000 })
+eq(heavy_err, nil, "default exclusions still succeed")
+eq(heavy_repos, { heavy_app, heavy_custom, heavy_lib }, "repos inside excluded directories are skipped by default")
+
+local custom_repos = discover_now(heavy, { timeout_ms = 5000, discovery_exclude = { "generated" } })
+local heavy_dep = assert(vim.uv.fs_realpath(heavy .. "/app/node_modules/dep"))
+assert(vim.tbl_contains(custom_repos, heavy_dep), "a custom exclusion list replaces the defaults")
+assert(not vim.tbl_contains(custom_repos, heavy_custom), "a custom exclusion list prunes its own names")
+
+-- An Explorer Root whose own name is excluded is still searched.
+local named_root_repos = discover_now(heavy .. "/rust/target", { timeout_ms = 5000 })
+eq(named_root_repos, {
+  (assert(vim.uv.fs_realpath(heavy .. "/rust/target/debug/build/vendored"))),
+  (assert(vim.uv.fs_realpath(heavy .. "/rust/target/release"))),
+}, "exclusions apply below the Explorer Root, not to the root itself")
+
+-- A killed or failed find is an error even when it printed partial results.
+local real_system = vim.system
+vim.system = function(cmd, opts, cb)
+  if cmd[1] == "find" then
+    vim.schedule(function()
+      cb({ code = 124, signal = 15, stdout = heavy .. "/app/.git\n", stderr = "" })
+    end)
+    return
+  end
+  return real_system(cmd, opts, cb)
+end
+local timed_out_repos, timed_out_err = discover_now(heavy, { timeout_ms = 5000 })
+vim.system = real_system
+eq(timed_out_repos, nil, "timed-out discovery delivers no partial repository list")
+assert(type(timed_out_err) == "string" and timed_out_err ~= "", "timed-out discovery reports an error")
+
 local worktree_base = vim.fn.tempname()
 local primary_repo = worktree_base .. "/primary"
 local linked_worktree = worktree_base .. "/linked"

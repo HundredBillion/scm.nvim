@@ -108,3 +108,11 @@ callbacks cannot replace newer cached results. Comparison Base calculations
 still run for each selected repository; they are not cached independently.
 A new nested repository inside an already known repository is discovered by
 explicit Refresh or reopening the Panel.
+
+## Bounded discovery (2026-10-22)
+
+Discovery skips directories named in `discovery_exclude` (build output and
+dependency trees such as `target` and `node_modules`) below the Explorer Root,
+so it finishes within `timeout_ms` on large trees. Repositories inside an
+excluded directory are not Repo Entries. A discovery that fails or times out is
+an error, never a partial repository list.

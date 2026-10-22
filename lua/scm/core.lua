@@ -9,7 +9,32 @@ M.defaults = {
   repo_debounce_ms = 150,
   -- Minimum ms between two full multi-repo rescans triggered by focus events.
   focus_debounce_ms = 1500,
+  -- Directory names discovery never descends into. Build output and dependency
+  -- trees can hold millions of files and would push the walk past timeout_ms.
+  -- A list given in setup replaces this one; {} searches everything.
+  discovery_exclude = {
+    "node_modules", "target", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache",
+    ".pytest_cache", ".gradle", ".next", ".terraform", ".zig-cache", "zig-cache", "DerivedData",
+  },
 }
+
+-- find arguments: skip excluded directory names below the root, then stop at each
+-- .git entry (a directory, or a worktree's .git file) and print it.
+local function find_args(root, exclude)
+  local args = { "find", root, "-mindepth", "1" }
+  if #exclude > 0 then
+    vim.list_extend(args, { "-type", "d", "(" })
+    for i, name in ipairs(exclude) do
+      if i > 1 then
+        args[#args + 1] = "-o"
+      end
+      vim.list_extend(args, { "-name", name })
+    end
+    vim.list_extend(args, { ")", "-prune", "-o" })
+  end
+  vim.list_extend(args, { "-name", ".git", "-prune", "-print" })
+  return args
+end
 
 -- Parse `git status --porcelain=v2 --branch` output into branch/ahead/behind
 -- plus File Entries carrying the raw XY Code verbatim.
@@ -144,7 +169,7 @@ function M.discover(root, opts, cb)
     end
   )
   vim.system(
-    { "find", root, "-name", ".git", "-prune", "-print" },
+    find_args(root, opts.discovery_exclude or M.defaults.discovery_exclude),
     { text = true, timeout = opts.timeout_ms },
     function(out)
       finish("find", out)
