@@ -10,6 +10,43 @@ function M.merge(previous, request)
   return {cached=true, paths=paths}
 end
 
+-- Refresh ordering for every Renderer. Each owner (a view or tab state) runs at
+-- most one Core refresh at a time. Requests made meanwhile merge into one re-run
+-- when the run lands, and only the newest request's result is delivered, so a
+-- slow older run can never overwrite newer Repo Entries. State lives on the
+-- owner: generation, refreshing and queued_request.
+--   hooks.start(request, done)  begin one run and call done(entries, err) once
+--   hooks.deliver(entries, err) publish the newest result; entries is nil on error
+--   hooks.alive()               optional; false drops the result and any re-run
+local function run(owner)
+  local hooks, request, generation = owner.refresh_hooks, owner.queued_request, owner.generation
+  owner.queued_request, owner.refreshing = nil, true
+  hooks.start(request, function(entries, err)
+    owner.refreshing = false
+    if hooks.alive and not hooks.alive() then return end
+    if generation == owner.generation then hooks.deliver(entries, err) end
+    if owner.queued_request then run(owner) end
+  end)
+end
+
+-- Returns true when the run starts now, false when it waits for the one in flight.
+-- An omitted request means full discovery.
+function M.request(owner, request, hooks)
+  owner.refresh_hooks = hooks
+  owner.queued_request = M.merge(owner.queued_request, request or {cached=false})
+  owner.generation = (owner.generation or 0) + 1
+  if owner.refreshing then return false end
+  run(owner)
+  return true
+end
+
+-- Forget queued requests and reject the result of the run in flight, for when
+-- what the owner shows changes (a different Explorer Root).
+function M.reset(owner)
+  owner.generation = (owner.generation or 0) + 1
+  owner.queued_request = nil
+end
+
 function M.event(owner, options, request, callback)
   owner.pending_event = M.merge(owner.pending_event, request)
   if owner.event_scheduled then return end

@@ -22,7 +22,6 @@ function M.tab_state(tab)
       collapsed = {},
       refreshing = false,
       generation = 0,
-      queued_root = nil,
     }
   end
   return M.state.tabs[tab]
@@ -231,8 +230,7 @@ function M.open(root)
   local next_root = root or scope.current()
   if state.root ~= next_root then
     state.entries = {}
-    state.generation = state.generation + 1
-    state.queued_root = nil
+    require("scm.refresh").reset(state)
   end
   state.root = next_root
   state.collapsed = {}
@@ -351,29 +349,24 @@ local function picker_for_tab(tab)
   end
 end
 
-local function run_full_refresh(tab, state)
-  local generation, root = state.generation, state.queued_root
-  local request = state.queued_request
-  state.queued_request = nil
-  state.queued_root = nil
-  state.refreshing = true
-  local picker = picker_for_tab(tab)
-  local anchor, anchor_idx
-  if picker then anchor, anchor_idx = capture_anchor(picker) end
-  core.refresh(root, M.state.opts, function(entries, err)
-    state.refreshing = false
-    if vim.api.nvim_tabpage_is_valid(tab) and generation == state.generation then
-      if not err then state.entries = entries end
+-- Panel adapter for the shared refresh ordering: scm.refresh decides when Core
+-- runs and which result is newest; this only renders it into the tab's picker.
+local function full_refresh_hooks(tab, state)
+  return {
+    start = function(request, done) core.refresh(state.root, M.state.opts, done, request) end,
+    alive = function() return vim.api.nvim_tabpage_is_valid(tab) end,
+    deliver = function(entries, err)
       local current = picker_for_tab(tab)
+      local anchor, anchor_idx
+      if current then anchor, anchor_idx = capture_anchor(current) end
+      if not err then state.entries = entries end
       if current then
-        local published = state.entries
         local title = err and ("Source Control (" .. err .. ")")
-          or (#published == 0 and "Source Control (no repositories under Explorer Root)" or "Source Control")
+          or (#state.entries == 0 and "Source Control (no repositories under Explorer Root)" or "Source Control")
         rerender(current, anchor, anchor_idx, title)
       end
-    end
-    if state.queued_root and vim.api.nvim_tabpage_is_valid(tab) then run_full_refresh(tab, state) end
-  end, request)
+    end,
+  }
 end
 
 function M.refresh_view(picker, request)
@@ -385,13 +378,8 @@ function M.refresh_view(picker, request)
     set_title(picker, "Source Control (Explorer Root unavailable)")
     return false
   end
-  state.generation = state.generation + 1
-  state.queued_root = state.root
-  state.queued_request = require("scm.refresh").merge(state.queued_request, request or {cached=false})
   set_title(picker, "Source Control (scanning…)")
-  if state.refreshing then return false end
-  run_full_refresh(tab, state)
-  return true
+  return require("scm.refresh").request(state, request, full_refresh_hooks(tab, state))
 end
 
 -- Scoped refresh: re-scan ONE repo and splice its fresh entry into every
@@ -411,9 +399,9 @@ function M.refresh_repo_view(repo)
           end
         end
         if found then
+          -- The full Refresh in flight started before this entry changed; replace it.
           if state.refreshing then
-            state.generation = state.generation + 1
-            state.queued_root = state.root
+            require("scm.refresh").request(state, {cached=false}, full_refresh_hooks(tab, state))
           end
           table.sort(state.entries, core.compare_entries)
           local picker = picker_for_tab(tab)

@@ -34,25 +34,15 @@ end
 local policy = require('scm.refresh')
 local function refresh(state, request)
   if active ~= state then return end
-  request = request or {cached=false}
-  state.pending_refresh = policy.merge(state.pending_refresh, request)
-  state.generation = (state.generation or 0) + 1
-  if state.scanning then return end
-  local function run()
-    local pending, generation = state.pending_refresh, state.generation
-    state.pending_refresh, state.scanning = nil, true
-    core.refresh(state.root, options, function(entries, err)
-      if active ~= state then return end
-      state.scanning = false
-      if generation == state.generation then
-        if not err then state.entries = entries end
-        state.error = err
-        render(state)
-      end
-      if state.pending_refresh then run() end
-    end, pending)
-  end
-  run()
+  policy.request(state, request, {
+    start = function(pending, done) core.refresh(state.root, options, done, pending) end,
+    deliver = function(entries, err)
+      if not err then state.entries = entries end
+      state.error = err
+      render(state)
+    end,
+    alive = function() return active == state end,
+  })
 end
 function M.focus(side)
   if side and side ~= 'left' then return false end
