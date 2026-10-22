@@ -440,9 +440,28 @@ function M.refresh_repo(repo, opts, cb)
   return true
 end
 
+-- The newest Repo Entries Core holds for root, sorted like a refresh delivers them, or
+-- nil before root's first discovery. Renderers show these while a refresh runs, so opening
+-- the Panel never waits on git. Scoped refreshes of one repository are included.
+function M.cached(root)
+  root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
+  local cached = scopes[root]
+  if not cached or not cached.repos then
+    return nil
+  end
+  local entries = {}
+  for _, repo in ipairs(cached.repos) do
+    entries[#entries + 1] = cached.entries[repo]
+  end
+  table.sort(entries, M.compare_entries)
+  return entries
+end
+
 -- Omitting request preserves the public full-discovery refresh behavior.
 -- Renderers pass cached=true and optional paths to reuse discovery for ordinary editor events.
-function M.refresh(root, opts, cb, request)
+-- progress(entries), when given, is called as each repository lands before the last;
+-- cb is still called exactly once.
+function M.refresh(root, opts, cb, request, progress)
   root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
   local cached = scopes[root]
   if not cached then
@@ -480,15 +499,17 @@ function M.refresh(root, opts, cb, request)
       end
     end
     local pending = #selected
-    local function publish()
+    -- Before the last repository lands, progress gets the same list with each repository
+    -- not scanned yet showing its cached entry, or left out on a root never seen before.
+    local function publish(deliver)
       local entries = {}
       for _, repo in ipairs(repos) do
         entries[#entries + 1] = cached.entries[repo] or snapshot[repo]
       end
       table.sort(entries, M.compare_entries)
-      cb(entries, nil)
+      deliver(entries, nil)
     end
-    if pending == 0 then publish(); return end
+    if pending == 0 then publish(cb); return end
     for _, repo in ipairs(selected) do
       enqueue_scan(repo, opts, function(entry)
         snapshot[repo] = entry
@@ -496,7 +517,11 @@ function M.refresh(root, opts, cb, request)
           cached.entries[repo], cached.versions[repo] = entry, version
         end
         pending = pending - 1
-        if pending == 0 then publish() end
+        if pending == 0 then
+          publish(cb)
+        elseif progress then
+          publish(progress)
+        end
       end)
     end
   end

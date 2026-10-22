@@ -15,17 +15,24 @@ end
 -- when the run lands, and only the newest request's result is delivered, so a
 -- slow older run can never overwrite newer Repo Entries. State lives on the
 -- owner: generation, refreshing and queued_request.
---   hooks.start(request, done)  begin one run and call done(entries, err) once
+--   hooks.start(request, done, progress)  begin one run and call done(entries, err) once,
+--                               and progress(entries) for partial results before it
 --   hooks.deliver(entries, err) publish the newest result; entries is nil on error
+--   hooks.progress(entries)     optional; render a partial result of the newest run
 --   hooks.alive()               optional; false drops the result and any re-run
 local function run(owner)
   local hooks, request, generation = owner.refresh_hooks, owner.queued_request, owner.generation
   owner.queued_request, owner.refreshing = nil, true
+  local function current()
+    return generation == owner.generation and not (hooks.alive and not hooks.alive())
+  end
   hooks.start(request, function(entries, err)
     owner.refreshing = false
     if hooks.alive and not hooks.alive() then return end
     if generation == owner.generation then hooks.deliver(entries, err) end
     if owner.queued_request then run(owner) end
+  end, function(entries)
+    if hooks.progress and current() then hooks.progress(entries) end
   end)
 end
 

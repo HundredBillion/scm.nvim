@@ -347,6 +347,50 @@ vim.wait(5000, function()
 end, 10)
 assert(got and #got == 2, "second refresh works")
 
+-- cached(): the last published Repo Entries for a root, for a renderer to show at once.
+eq(core.cached(vim.fn.tempname()), nil, "a root never refreshed has nothing cached")
+eq(core.cached(work), got, "cached entries match the last refresh, in its order")
+eq(core.cached(vim.uv.fs_realpath(work)), got, "cached entries are found through the canonical root too")
+vim.fn.writefile({ "changed too" }, cleanrepo .. "/a.txt")
+got = nil
+core.refresh(work, { timeout_ms = 5000 }, function(entries)
+  got = entries
+end)
+vim.wait(5000, function()
+  return got ~= nil
+end, 10)
+local cached_clean
+for _, entry in ipairs(core.cached(work)) do
+  if entry.name == "clean_repo" then cached_clean = entry end
+end
+eq(#cached_clean.files, 1, "a later refresh replaces the cached entries")
+vim.fn.writefile({ "hello" }, cleanrepo .. "/a.txt")
+
+-- progress: each repository's entry is published as it lands, before the final callback.
+local function refresh_with_progress(dir)
+  local calls, final, late = {}, nil, false
+  core.refresh(dir, { timeout_ms = 5000 }, function(entries)
+    final = entries
+  end, nil, function(entries)
+    if final then late = true end
+    calls[#calls + 1] = vim.tbl_map(function(e) return e.name end, entries)
+  end)
+  vim.wait(5000, function()
+    return final ~= nil
+  end, 10)
+  assert(final, "refresh with progress finished for " .. dir)
+  return calls, late
+end
+local progress_root = vim.fn.tempname()
+repo_at(progress_root .. "/first")
+repo_at(progress_root .. "/second")
+local first_calls, first_late = refresh_with_progress(progress_root)
+eq(#first_calls, 1, "one progress update for two repositories: the last one is the final callback")
+eq(#first_calls[1], 1, "on a new root the first repository shows before the last one lands")
+eq(first_late, false, "no progress arrives after the final callback")
+local again_calls = refresh_with_progress(progress_root)
+eq(again_calls, { { "first", "second" } }, "on a cached root, repositories not rescanned yet keep their cached rows")
+
 -- refresh(): per-repo error path must not short-circuit other repos.
 -- A directory whose `.git` is a bare, uninitialized dir looks like a repo to
 -- discovery (find sees the `.git` entry) but `git status` inside it fails.
@@ -778,8 +822,8 @@ local open_pending = {}
 local open_tab = vim.api.nvim_get_current_tabpage()
 opened_picker.list.win = { win = vim.api.nvim_get_current_win() }
 opened_picker.input.win.win = vim.api.nvim_get_current_win()
-core.refresh = function(root, opts, cb)
-  open_pending[#open_pending + 1] = { root = root, opts = opts, cb = cb }
+core.refresh = function(root, opts, cb, _, progress)
+  open_pending[#open_pending + 1] = { root = root, opts = opts, cb = cb, progress = progress }
   return true
 end
 _G.Snacks = {
@@ -830,6 +874,31 @@ panel_state().entries = nav_entries
 panel_state().collapsed["/repos/dirty"] = true
 eq(#opened_opts.finder(), 5, "open finder honors collapsed state")
 eq(panel.key_actions, nil, "picker actions remain a private implementation detail")
+
+-- Opening shows Core's cached Repo Entries at once, then each repository as it lands.
+local previous_core_cached = core.cached
+local cached_entry, landed_entry = vim.deepcopy(nav_entries[2]), vim.deepcopy(nav_entries[1])
+core.cached = function(root)
+  return root == "/cached/root" and { cached_entry } or nil
+end
+active_picker = nil
+open_pending = {}
+opened_picker = fake_picker({}) -- each open gets a new picker, not yet owned by a tab
+opened_picker.list.win = { win = vim.api.nvim_get_current_win() }
+opened_picker.input.win.win = vim.api.nvim_get_current_win()
+panel.open("/cached/root")
+eq(#open_pending, 1, "the cached open starts one Core request")
+eq(panel_state().entries, { cached_entry }, "open starts from the cached Repo Entries")
+eq(opened_opts.finder()[1].entry, cached_entry, "cached rows are on screen before git answers")
+eq(opened_picker.title, "Source Control (scanning…)", "cached rows are marked as being refreshed")
+open_pending[1].progress({ landed_entry })
+eq(panel_state().entries, { landed_entry }, "a repository that lands replaces the cached rows")
+eq(opened_picker:items()[1].entry, landed_entry, "progress is rendered")
+eq(opened_picker.title, "Source Control (scanning…)", "progress keeps the scanning title")
+open_pending[1].cb({ landed_entry, cached_entry }, nil)
+eq(opened_picker.title, "Source Control", "the final result clears the scanning title")
+core.cached = previous_core_cached
+
 core.refresh = previous_core_refresh
 _G.Snacks = previous_snacks
 

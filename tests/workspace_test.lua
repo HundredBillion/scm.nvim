@@ -56,6 +56,21 @@ press('l')
 assert(vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win)) == 5, 'l expands repository')
 scm.toggle()
 assert(vim.wait(1000, function() return not panel() end), 'toggle closes panel')
+local function panel_text()
+  return table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(assert(panel())), 0, -1, false), '\n')
+end
+-- Reopening shows the last rows at once, before git answers, then each repository as it lands.
+local core = require('scm.core')
+local real_refresh, progress = core.refresh, nil
+core.refresh = function(_, _, _, _, on_progress) progress = on_progress end
+scm.toggle()
+assert(panel_text():find('second.lua', 1, true), 'reopen shows cached rows before any git result')
+assert(progress, 'the reopen refresh accepts progress')
+progress({{name='repo', path=root, branch='main', ahead=0, behind=0, clean=false,
+  files={{path='landed.lua', xy='.M'}}}})
+assert(panel_text():find('landed.lua', 1, true), 'a repository that lands is rendered before the refresh ends')
+scm.toggle()
+core.refresh = real_refresh
 local requested
 scm.setup({renderer='terminal', on_explorer=function(path) requested=path end})
 scm.toggle()
