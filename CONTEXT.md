@@ -115,6 +115,7 @@ explicit Refresh or reopening the Panel.
 
 Discovery skips directories named in `discovery_exclude` (build output and
 dependency trees such as `target` and `node_modules`) below the Explorer Root,
-so it finishes within `timeout_ms` on large trees. Repositories inside an
+so it finishes within `discovery_timeout_ms` (15 s by default, separate from
+the per-repository `timeout_ms`) on large trees. Repositories inside an
 excluded directory are not Repo Entries. A discovery that fails or times out is
 an error, never a partial repository list.

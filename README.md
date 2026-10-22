@@ -43,7 +43,9 @@ opening their historical contents awaits prism integration.
 
 SCM finds repositories by walking the Explorer root for `.git` entries. The
 walk skips build output and dependency directories by name so it finishes
-within `timeout_ms` (default 5000) on large trees. The default
+within `discovery_timeout_ms` (default 15000) on large trees. This limit
+covers the walk only; each per-repository git command keeps `timeout_ms`
+(default 5000). The default
 `discovery_exclude` list is `node_modules`, `target`, `.venv`, `venv`,
 `__pycache__`, `.tox`, `.mypy_cache`, `.pytest_cache`, `.gradle`, `.next`,
 `.terraform`, `.zig-cache`, `zig-cache` and `DerivedData`. A directory with one
@@ -59,9 +61,9 @@ opts = {
 }
 ```
 
-If discovery still exceeds `timeout_ms`, SCM shows an error rather than a
-partial list. Add the heavy directory names to `discovery_exclude` or raise
-`timeout_ms`.
+If discovery still exceeds `discovery_timeout_ms`, SCM shows an error rather
+than a partial list. Add the heavy directory names to `discovery_exclude` or
+raise `discovery_timeout_ms`.
 
 ## Legacy Snacks install
 

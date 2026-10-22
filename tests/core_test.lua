@@ -181,6 +181,21 @@ vim.system = real_system
 eq(timed_out_repos, nil, "timed-out discovery delivers no partial repository list")
 assert(type(timed_out_err) == "string" and timed_out_err ~= "", "timed-out discovery reports an error")
 
+-- The find walk gets its own, longer limit; per-repo git commands keep timeout_ms.
+local function timeouts_for(opts)
+  local seen = {}
+  vim.system = function(cmd, sys_opts, cb)
+    seen[cmd[1]] = sys_opts.timeout
+    return real_system(cmd, sys_opts, cb)
+  end
+  discover_now(heavy, opts)
+  vim.system = real_system
+  return seen
+end
+eq(core.defaults.discovery_timeout_ms, 15000, "discovery allows 15 s by default")
+eq(timeouts_for({ timeout_ms = 5000 }), { find = 15000, git = 5000 }, "find uses the discovery default, git keeps timeout_ms")
+eq(timeouts_for({ timeout_ms = 5000, discovery_timeout_ms = 30000 }), { find = 30000, git = 5000 }, "discovery_timeout_ms is configurable")
+
 local worktree_base = vim.fn.tempname()
 local primary_repo = worktree_base .. "/primary"
 local linked_worktree = worktree_base .. "/linked"

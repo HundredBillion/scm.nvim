@@ -4,13 +4,17 @@ local M = {}
 
 M.defaults = {
   timeout_ms = 5000,
+  -- Limit for the repository-discovery walk alone. Large roots of real source
+  -- trees still take several seconds after exclusions, so this is longer than
+  -- timeout_ms, which bounds each per-repo git command.
+  discovery_timeout_ms = 15000,
   -- Minimum ms between two refreshes of the SAME repo (event storms from
   -- autocmds must never stack git processes for one repo).
   repo_debounce_ms = 150,
   -- Minimum ms between two full multi-repo rescans triggered by focus events.
   focus_debounce_ms = 1500,
   -- Directory names discovery never descends into. Build output and dependency
-  -- trees can hold millions of files and would push the walk past timeout_ms.
+  -- trees can hold millions of files and would push the walk past discovery_timeout_ms.
   -- A list given in setup replaces this one; {} searches everything.
   discovery_exclude = {
     "node_modules", "target", ".venv", "venv", "__pycache__", ".tox", ".mypy_cache",
@@ -170,7 +174,7 @@ function M.discover(root, opts, cb)
   )
   vim.system(
     find_args(root, opts.discovery_exclude or M.defaults.discovery_exclude),
-    { text = true, timeout = opts.timeout_ms },
+    { text = true, timeout = opts.discovery_timeout_ms or M.defaults.discovery_timeout_ms },
     function(out)
       finish("find", out)
     end
