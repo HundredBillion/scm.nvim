@@ -51,4 +51,21 @@ refresh()
 local parent_scans = scans['/scope/a']
 refresh({cached=true,paths={['/scope/a/nested/file']=true}})
 assert(scans['/scope/a']==parent_scans, 'nested save selects deepest containing repository')
+-- Overlapping refreshes (an open during the startup warm-up) share scans still waiting in
+-- the queue, which start after both requests. Scans already running are not shared: they
+-- may predate the newer request, so its repositories are scanned again.
+local before, results = vim.deepcopy(scans), {}
+for i = 1, 2 do
+  core.refresh('/scope', {timeout_ms=5000}, function(entries) results[i] = entries end, {cached=true})
+end
+assert(vim.wait(2000, function() return results[1] and results[2] end), 'overlapping refreshes complete')
+local added, rescanned = 0, 0
+for _, repo in ipairs(repos) do
+  local delta = (scans[repo] or 0) - (before[repo] or 0)
+  added = added + delta
+  if delta == 2 then rescanned = rescanned + 1 end
+end
+assert(#results[1] == #repos and #results[2] == #repos, 'both refreshes deliver every repository')
+assert(rescanned == 4, 'only the four scans already running are repeated; got ' .. rescanned)
+assert(added == #repos + 4, 'queued scans are shared; status calls=' .. added .. ' for ' .. #repos .. ' repos')
 print('OK refresh policy: discovery=' .. discovery .. ', peak Git jobs=' .. peak)

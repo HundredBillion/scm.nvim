@@ -377,20 +377,34 @@ local function scan_repo(repo, opts, cb)
   end)
 end
 
-local scan_queue, scans_running = {}, 0
+-- A repository waiting in the queue has one job that every caller asking for it joins,
+-- so overlapping refreshes (an open during the startup warm-up) do not scan it twice.
+-- A queued scan starts after every request that joined it, so its result is current for
+-- all of them. A running scan may predate a newer request and is never joined.
+local scan_queue, scans_running, queued_scans = {}, 0, {}
 local function drain_scans()
   while scans_running < 4 and #scan_queue > 0 do
     local job = table.remove(scan_queue, 1)
+    queued_scans[job.repo] = nil
     scans_running = scans_running + 1
     scan_repo(job.repo, job.opts, function(entry)
       scans_running = scans_running - 1
-      job.cb(entry)
+      for _, cb in ipairs(job.cbs) do
+        cb(entry)
+      end
       drain_scans()
     end)
   end
 end
 local function enqueue_scan(repo, opts, cb)
-  scan_queue[#scan_queue + 1] = {repo=repo, opts=opts, cb=cb}
+  local job = queued_scans[repo]
+  if job then
+    job.cbs[#job.cbs + 1] = cb
+    return
+  end
+  job = {repo=repo, opts=opts, cbs={cb}}
+  queued_scans[repo] = job
+  scan_queue[#scan_queue + 1] = job
   drain_scans()
 end
 
