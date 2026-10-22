@@ -22,22 +22,69 @@ M.defaults = {
   },
 }
 
--- find arguments: skip excluded directory names below the root, then stop at each
--- .git entry (a directory, or a worktree's .git file) and print it.
-local function find_args(root, exclude)
-  local args = { "find", root, "-mindepth", "1" }
-  if #exclude > 0 then
-    vim.list_extend(args, { "-type", "d", "(" })
-    for i, name in ipairs(exclude) do
-      if i > 1 then
-        args[#args + 1] = "-o"
-      end
-      vim.list_extend(args, { "-name", name })
-    end
-    vim.list_extend(args, { ")", "-prune", "-o" })
+-- Walk the Explorer Root for repositories without a subprocess. A directory holding a
+-- .git entry (a directory, or a worktree's .git file) is a repository and ends the
+-- search there: walking its working tree for nested clones is what made discovery take
+-- seconds. Symlinked and excluded directories are not entered. Calls cb(repos) or
+-- cb(nil, err) once; any unreadable directory fails the whole walk, never a partial list.
+local function walk(root, exclude, limit, cb)
+  local skip = {}
+  for _, name in ipairs(exclude) do
+    skip[name] = true
   end
-  vim.list_extend(args, { "-name", ".git", "-prune", "-print" })
-  return args
+  local repos, pending, finished = {}, 0, false
+  local timer = vim.uv.new_timer()
+  local function finish(found, err)
+    if finished then
+      return
+    end
+    finished = true
+    timer:stop()
+    timer:close()
+    cb(found, err)
+  end
+  timer:start(limit, 0, function()
+    finish(nil, string.format(
+      "repository discovery timed out after %g s; add large folders to discovery_exclude",
+      limit / 1000
+    ))
+  end)
+  local function visit(dir)
+    pending = pending + 1
+    vim.uv.fs_scandir(dir, function(err, handle)
+      if finished then
+        return
+      end
+      if err then
+        finish(nil, err)
+        return
+      end
+      local subdirs, is_repo = {}, false
+      while true do
+        local name, kind = vim.uv.fs_scandir_next(handle)
+        if not name then
+          break
+        end
+        if name == ".git" then
+          is_repo = true
+        elseif kind == "directory" and not skip[name] then
+          subdirs[#subdirs + 1] = dir .. "/" .. name
+        end
+      end
+      if is_repo then
+        repos[#repos + 1] = dir
+      else
+        for _, sub in ipairs(subdirs) do
+          visit(sub)
+        end
+      end
+      pending = pending - 1
+      if pending == 0 then
+        finish(repos)
+      end
+    end)
+  end
+  visit(root)
 end
 
 -- Parse `git status --porcelain=v2 --branch` output into branch/ahead/behind
@@ -132,6 +179,39 @@ local function merge_files(committed, pending)
   return files
 end
 
+-- The walk stops at a repository, so worktrees placed inside one (such as .worktrees/x)
+-- come from git instead. Only a repository whose .git directory holds a worktrees/
+-- folder has any, so the rest cost no subprocess. Calls cb(paths) with each worktree
+-- under root whose directory still exists; a failed git call adds nothing.
+local function linked_worktrees(repos, root, timeout, cb)
+  local found, pending = {}, 1
+  local function settle()
+    pending = pending - 1
+    if pending == 0 then
+      cb(found)
+    end
+  end
+  for _, repo in ipairs(repos) do
+    local stat = vim.uv.fs_stat(repo .. "/.git/worktrees")
+    if stat and stat.type == "directory" then
+      pending = pending + 1
+      vim.system({ "git", "-C", repo, "worktree", "list", "--porcelain", "-z" }, { text = true, timeout = timeout }, function(out)
+        if out.code == 0 then
+          for _, field in ipairs(vim.split(out.stdout or "", "\0", { plain = true, trimempty = true })) do
+            local path = field:match("^worktree (.+)$")
+            path = path and vim.uv.fs_realpath(path)
+            if path and path ~= repo and (path == root or path:sub(1, #root + 1) == root .. "/") then
+              found[#found + 1] = path
+            end
+          end
+        end
+        settle()
+      end)
+    end
+  end
+  settle()
+end
+
 function M.discover(root, opts, cb)
   root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
   local landed, pending = {}, 2
@@ -142,17 +222,8 @@ function M.discover(root, opts, cb)
       return
     end
     vim.schedule(function()
-      if landed.find.code ~= 0 then
-        -- vim.system reports a killed-on-timeout process as exit code 124.
-        if landed.find.code == 124 then
-          local limit = opts.discovery_timeout_ms or M.defaults.discovery_timeout_ms
-          cb(nil, string.format(
-            "repository discovery timed out after %g s; add large folders to discovery_exclude",
-            limit / 1000
-          ))
-          return
-        end
-        local msg = vim.trim(landed.find.stderr or "")
+      if landed.walk.err then
+        local msg = vim.trim(landed.walk.err)
         cb(nil, msg ~= "" and msg or "repository discovery failed")
         return
       end
@@ -167,8 +238,11 @@ function M.discover(root, opts, cb)
       if landed.parent.code == 0 then
         add(vim.trim(landed.parent.stdout or ""))
       end
-      for _, git_entry in ipairs(vim.split(landed.find.stdout or "", "\n", { trimempty = true })) do
-        add(vim.fs.dirname(git_entry))
+      for _, repo in ipairs(landed.walk.repos) do
+        add(repo)
+      end
+      for _, worktree in ipairs(landed.walk.worktrees) do
+        add(worktree)
       end
       table.sort(repos)
       cb(repos, nil)
@@ -181,11 +255,18 @@ function M.discover(root, opts, cb)
       finish("parent", out)
     end
   )
-  vim.system(
-    find_args(root, opts.discovery_exclude or M.defaults.discovery_exclude),
-    { text = true, timeout = opts.discovery_timeout_ms or M.defaults.discovery_timeout_ms },
-    function(out)
-      finish("find", out)
+  walk(
+    root,
+    opts.discovery_exclude or M.defaults.discovery_exclude,
+    opts.discovery_timeout_ms or M.defaults.discovery_timeout_ms,
+    function(repos, err)
+      if err then
+        finish("walk", { err = err })
+        return
+      end
+      linked_worktrees(repos, root, opts.timeout_ms, function(worktrees)
+        finish("walk", { repos = repos, worktrees = worktrees })
+      end)
     end
   )
   return true

@@ -99,7 +99,7 @@ end)
 vim.wait(5000, function()
   return root_discovered ~= nil
 end, 10)
-eq(root_discovered, { parent_real, deep_real }, "Root repository is deduplicated and nested symlinks are not traversed")
+eq(root_discovered, { parent_real }, "a Root that is a repository is not searched below and is listed once")
 
 local parent_link = tmp .. "/parent-link"
 assert(vim.uv.fs_symlink(parent, parent_link, { dir = true }), "create symlinked Explorer Root")
@@ -111,7 +111,7 @@ end)
 vim.wait(5000, function()
   return linked_discovered ~= nil
 end, 10)
-eq(linked_discovered, { parent_real, deep_real }, "symlinked Explorer Root is canonicalized once before discovery")
+eq(linked_discovered, { parent_real }, "symlinked Explorer Root is canonicalized once before discovery")
 
 local missing_err
 core.discover(root .. "/missing", { timeout_ms = 5000 }, function(_, err)
@@ -154,8 +154,8 @@ eq(heavy_err, nil, "default exclusions still succeed")
 eq(heavy_repos, { heavy_app, heavy_custom, heavy_lib }, "repos inside excluded directories are skipped by default")
 
 local custom_repos = discover_now(heavy, { timeout_ms = 5000, discovery_exclude = { "generated" } })
-local heavy_dep = assert(vim.uv.fs_realpath(heavy .. "/app/node_modules/dep"))
-assert(vim.tbl_contains(custom_repos, heavy_dep), "a custom exclusion list replaces the defaults")
+local heavy_pkg = assert(vim.uv.fs_realpath(heavy .. "/py/.venv/src/pkg"))
+assert(vim.tbl_contains(custom_repos, heavy_pkg), "a custom exclusion list replaces the defaults")
 assert(not vim.tbl_contains(custom_repos, heavy_custom), "a custom exclusion list prunes its own names")
 
 -- An Explorer Root whose own name is excluded is still searched.
@@ -165,54 +165,62 @@ eq(named_root_repos, {
   (assert(vim.uv.fs_realpath(heavy .. "/rust/target/release"))),
 }, "exclusions apply below the Explorer Root, not to the root itself")
 
--- A killed or failed find is an error even when it printed partial results.
+-- discover(): a repository ends the search; clones nested inside it are not listed.
+local stops = vim.fn.tempname()
+local stops_outer = repo_at(stops .. "/outer")
+repo_at(stops .. "/outer/vendor/clone")
+local stops_deep = repo_at(stops .. "/plain/folders/deep")
+eq(discover_now(stops, { timeout_ms = 5000 }), { stops_outer, stops_deep }, "a repository is not searched for nested clones")
+
+-- A walk that runs past its limit is an error even when it already found repositories.
 local real_system = vim.system
-vim.system = function(cmd, opts, cb)
-  if cmd[1] == "find" then
-    vim.schedule(function()
-      cb({ code = 124, signal = 15, stdout = heavy .. "/app/.git\n", stderr = "" })
-    end)
-    return
+local real_scandir = vim.uv.fs_scandir
+vim.uv.fs_scandir = function(dir, cb)
+  if dir:match("/libs$") then
+    return -- this directory never answers
   end
-  return real_system(cmd, opts, cb)
+  return real_scandir(dir, cb)
 end
-local timed_out_repos, timed_out_err = discover_now(heavy, { timeout_ms = 5000 })
-vim.system = real_system
+local timed_out_repos, timed_out_err = discover_now(heavy, { timeout_ms = 5000, discovery_timeout_ms = 50 })
+vim.uv.fs_scandir = real_scandir
 eq(timed_out_repos, nil, "timed-out discovery delivers no partial repository list")
 eq(
   timed_out_err,
-  "repository discovery timed out after 15 s; add large folders to discovery_exclude",
+  "repository discovery timed out after 0.05 s; add large folders to discovery_exclude",
   "timed-out discovery says it timed out and how to fix it"
 )
 
--- A find that fails without stderr still reports a generic error.
-vim.system = function(cmd, opts, cb)
-  if cmd[1] == "find" then
-    vim.schedule(function()
-      cb({ code = 1, signal = 0, stdout = "", stderr = "" })
-    end)
+-- A directory that cannot be read fails discovery; a failure without a message stays generic.
+vim.uv.fs_scandir = function(dir, cb)
+  if dir:match("/libs$") then
+    return real_scandir(dir .. "/missing", cb)
+  end
+  return real_scandir(dir, cb)
+end
+local unreadable_repos, unreadable_err = discover_now(heavy, { timeout_ms = 5000 })
+vim.uv.fs_scandir = function(dir, cb)
+  if dir:match("/libs$") then
+    vim.schedule(function() cb("") end)
     return
   end
-  return real_system(cmd, opts, cb)
+  return real_scandir(dir, cb)
 end
 local _, failed_err = discover_now(heavy, { timeout_ms = 5000 })
-vim.system = real_system
+vim.uv.fs_scandir = real_scandir
+eq(unreadable_repos, nil, "an unreadable directory delivers no partial repository list")
+assert(unreadable_err:match("ENOENT"), "an unreadable directory reports why: " .. tostring(unreadable_err))
 eq(failed_err, "repository discovery failed", "non-timeout failure keeps the generic error")
 
--- The find walk gets its own, longer limit; per-repo git commands keep timeout_ms.
-local function timeouts_for(opts)
-  local seen = {}
-  vim.system = function(cmd, sys_opts, cb)
-    seen[cmd[1]] = sys_opts.timeout
-    return real_system(cmd, sys_opts, cb)
-  end
-  discover_now(heavy, opts)
-  vim.system = real_system
-  return seen
+-- The walk has its own limit and runs no subprocess; git commands keep timeout_ms.
+local seen = {}
+vim.system = function(cmd, sys_opts, cb)
+  seen[cmd[1]] = sys_opts.timeout
+  return real_system(cmd, sys_opts, cb)
 end
+discover_now(heavy, { timeout_ms = 5000 })
+vim.system = real_system
 eq(core.defaults.discovery_timeout_ms, 15000, "discovery allows 15 s by default")
-eq(timeouts_for({ timeout_ms = 5000 }), { find = 15000, git = 5000 }, "find uses the discovery default, git keeps timeout_ms")
-eq(timeouts_for({ timeout_ms = 5000, discovery_timeout_ms = 30000 }), { find = 30000, git = 5000 }, "discovery_timeout_ms is configurable")
+eq(seen, { git = 5000 }, "discovery spawns only git, which keeps timeout_ms")
 
 local worktree_base = vim.fn.tempname()
 local primary_repo = worktree_base .. "/primary"
@@ -240,6 +248,26 @@ local expected_worktrees = {
 }
 table.sort(expected_worktrees)
 eq(worktree_discovered, expected_worktrees, "discovery includes repository directories and worktree .git files")
+
+-- Worktrees git knows about are listed even inside their repository, unlike nested clones.
+-- Worktrees outside the Explorer Root, or whose directory is gone, are not.
+local nested_wt = primary_repo .. "/.worktrees/feature"
+local gone_wt = primary_repo .. "/.worktrees/gone"
+sh({ "git", "-C", primary_repo, "worktree", "add", "-q", "-b", "feature", nested_wt })
+sh({ "git", "-C", primary_repo, "worktree", "add", "-q", "-b", "gone", gone_wt })
+vim.fn.delete(gone_wt, "rf")
+local outside_wt = vim.fn.tempname()
+sh({ "git", "-C", primary_repo, "worktree", "add", "-q", "-b", "outside", outside_wt })
+local primary_real = assert(vim.uv.fs_realpath(primary_repo))
+local nested_real = assert(vim.uv.fs_realpath(nested_wt))
+local nested_expected = vim.list_extend({ nested_real }, expected_worktrees)
+table.sort(nested_expected)
+eq(discover_now(worktree_base, { timeout_ms = 5000 }), nested_expected, "worktrees inside a repository are listed")
+eq(
+  discover_now(primary_repo, { timeout_ms = 5000 }),
+  { primary_real, nested_real },
+  "a Root that is a repository still lists its own worktrees below it"
+)
 
 vim.fn.writefile({ "changed outside Explorer Root" }, linked_worktree .. "/outside.txt")
 local worktree_status
