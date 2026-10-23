@@ -30,13 +30,19 @@ jobs:
 
       - name: Run SCM headless tests
         run: |
+          nvim -l tests/init_test.lua
+          nvim -l tests/no_dependencies_test.lua
           nvim -l tests/handoff_test.lua
           nvim -l tests/core_test.lua
-          nvim -l tests/explorer_scope_test.lua
+          nvim -l tests/scope_test.lua
           nvim -l tests/workspace_test.lua
           nvim -l tests/native_workspace_test.lua
           nvim -l tests/refresh_ordering_test.lua
           nvim -l tests/warm_test.lua
+          nvim -l tests/refresh_events_test.lua
+          nvim -l tests/refresh_races_test.lua
+          nvim -l tests/refresh_policy_test.lua
+          nvim -l tests/sprite_busy_input_test.lua
 
       - name: Check proposed diff for whitespace errors
         if: github.event_name == 'pull_request'

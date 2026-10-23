@@ -1,59 +1,66 @@
 # scm.nvim
 
-`scm.nvim` is a multi-repository source-control panel for Neovim. It discovers
-every Git repository under the current Explorer root and renders their status
-in one sidebar. Choose a built-in terminal sidebar, a native Sprite dock with
-terminal fallback, or the original Snacks sidebar.
+`scm.nvim` is a multi-repository source-control panel for Neovim. It finds every
+Git repository under Neovim's current directory and shows their changes in one
+sidebar, drawn in a Neovim split or, with Sprite, a native dock. It needs no
+other plugin and works with any file explorer.
 
 Originally developed inside the [Sprite](https://github.com/HundredBillion/Sprite)
 repository as its Phase 0 track, it now lives here as a standalone plugin.
 
-## Standalone sidebar (no Snacks)
+## Install
 
 ```lua
 {
   "HundredBillion/scm.nvim",
+  event = "VeryLazy",
   opts = { renderer = "auto" },
   keys = { { "<leader>gs", function() require("scm").toggle() end, desc = "Source Control" } },
 }
 ```
 
-`auto` uses `sprite.nvim` when installed and the host supports native docks;
-otherwise it opens a Neovim split. `terminal` always uses the split. `sprite`
-also falls back, with a warning. Sprite is optional; no Snacks code is loaded
-by these renderers. Omit `renderer` (or use `snacks`) to keep legacy behavior.
+`auto`, the default, uses `sprite.nvim` when installed and the host supports
+native docks; otherwise it opens a Neovim split. `terminal` always uses the
+split. `sprite` also falls back, with a warning.
 
 Use Enter to open a changed file or toggle a repository, h/l to collapse/expand,
 r to refresh, Escape to return to the editor and q to close. Space-e or Ctrl-b
-switches to SVGTree when installed. Route your editor's explorer mappings through
-`scm.handoff(function() require('svgtree').toggle() end)` to close SCM first.
-The sidebar closes when leaving its tab. It refreshes after editor writes,
-terminal exit and focus return. `width` sets terminal columns (default 36),
-`native_width` sets Sprite pixels (default 300). `native.colors` overrides
-native list color roles such as `background` and `foreground`; omitted roles
-keep their defaults.
+opens your file explorer once one is connected (see below). The sidebar closes
+when leaving its tab. It refreshes after editor writes and when Neovim regains
+focus. `width` sets terminal columns (default 36), `native_width` sets Sprite
+pixels (default 300). `native.colors` overrides native list color roles such as
+`background` and `foreground`; omitted roles keep their defaults.
 
-This first standalone renderer lists pending changes and commits relative to
-the existing default-branch merge base. It does not yet include prism diffs,
-PR-target lookup, CRP, agent following, automatic filesystem watching, staging,
-or the legacy Snacks fuzzy picker/lazygit actions. Deleted files are listed;
-opening their historical contents awaits prism integration.
+The sidebar lists pending changes and commits relative to the existing
+default-branch merge base. It does not yet include diffs, staging, filtering,
+PR-target lookup, CRP, agent following, or automatic filesystem watching.
+Deleted files are listed; opening their historical contents is not yet
+supported.
+
+## Which folder is scanned
+
+SCM scans Neovim's current directory (`:pwd`) for the window you open it from,
+so `:cd`, `:tcd` and `:lcd` all steer it. File explorers such as SVGTree,
+Neo-tree and the Snacks explorer change that directory when they move to a
+folder, so SCM follows them without knowing which one you use. While SCM is
+open, changing that window's directory moves SCM to the new folder; an `:lcd`
+in another window, such as a terminal, does not.
 
 ## Repository discovery
 
-SCM finds repositories by walking the Explorer root and stopping at each one, so
-it takes milliseconds even on large trees. Worktrees inside a repository (such as
-`.worktrees/x`) are listed; clones nested inside a repository, like vendored code,
-are not. The walk skips build output and dependency directories by name and must
-finish within `discovery_timeout_ms` (default 15000); each per-repository git
-command keeps `timeout_ms` (default 5000).
+SCM finds repositories by walking the current directory and stopping at each
+one, so it takes milliseconds even on large trees. Worktrees inside a repository
+(such as `.worktrees/x`) are listed; clones nested inside a repository, like
+vendored code, are not. The walk skips build output and dependency directories
+by name and must finish within `discovery_timeout_ms` (default 15000); each
+per-repository git command keeps `timeout_ms` (default 5000).
 
 The default `discovery_exclude` list is `node_modules`, `target`, `.venv`, `venv`,
 `__pycache__`, `.tox`, `.mypy_cache`, `.pytest_cache`, `.gradle`, `.next`,
 `.terraform`, `.zig-cache`, `zig-cache` and `DerivedData`. A directory with one
 of these names is skipped entirely, so repositories inside it, or a repository
-that itself has one of these names, are not listed. The Explorer root itself is
-always searched, even when its own name is in the list.
+that itself has one of these names, are not listed. The current directory itself
+is always searched, even when its own name is in the list.
 
 A list you pass replaces the default; `{}` searches everything:
 
@@ -68,69 +75,46 @@ than a partial list. Add the heavy directory names to `discovery_exclude` or
 raise `discovery_timeout_ms`.
 
 Opening SCM shows the last known changes at once and updates them as each
-repository is rescanned. After startup SCM scans the Explorer root once so even
-the first open is instant; set `warm = false` to turn that off. With lazy.nvim,
-load the plugin at startup (for example `event = "VeryLazy"`) for the warm-up to
-run before the first open.
+repository is rescanned. After startup SCM scans the current directory once so
+even the first open is instant; set `warm = false` to turn that off. With
+lazy.nvim, load the plugin at startup (for example `event = "VeryLazy"`) for the
+warm-up to run before the first open.
 
-## Legacy Snacks install
+## Connecting a file explorer
 
-```lua
-return {
-  {
-    "HundredBillion/scm.nvim",
-    dependencies = { "folke/snacks.nvim" },
-    opts = {},
-    keys = {
-      {
-        "<leader>gC",
-        function()
-          require("scm").toggle()
-        end,
-        desc = "Source Control",
-      },
-    },
-    config = function(_, opts)
-      require("scm").setup(opts)
-    end,
-  },
-}
-```
-
-## Explorer handoff mappings
-
-SCM and Explorer own the same sidebar position. Route every configured
-Explorer entry point through `require("scm").handoff()` so SCM closes before
-Explorer opens. Preserve the mapping's existing root semantics by passing the
-same `cwd` to Snacks:
+SCM and a file explorer share the left side of the screen. SCM never opens or
+closes an explorer itself; connect yours in your config:
 
 ```lua
-local function explorer(cwd)
-  require("lazy").load({ plugins = { "scm.nvim" } })
+local function open_explorer()
   require("scm").handoff(function()
-    Snacks.explorer(cwd and { cwd = cwd } or nil)
+    require("svgtree").toggle() -- or vim.cmd("Neotree"), Snacks.explorer(), ...
   end)
 end
 
 return {
-  "folke/snacks.nvim",
+  "HundredBillion/scm.nvim",
+  event = "VeryLazy",
+  opts = {
+    renderer = "auto",
+    -- Space-e or Ctrl-b inside SCM opens your explorer.
+    on_explorer = open_explorer,
+  },
   keys = {
-    { "<leader>fe", function() explorer(LazyVim.root()) end, desc = "Explorer Snacks (root dir)" },
-    { "<leader>fE", function() explorer() end, desc = "Explorer Snacks (cwd)" },
-    { "<leader>e", function() explorer(LazyVim.root()) end, desc = "Explorer Snacks (root dir)" },
-    { "<leader>E", function() explorer() end, desc = "Explorer Snacks (cwd)" },
+    {
+      "<leader>gs",
+      function()
+        require("svgtree").close() -- close your explorer before SCM opens
+        require("scm").toggle()
+      end,
+      desc = "Source Control",
+    },
+    { "<leader>e", open_explorer, desc = "Explorer" },
   },
 }
 ```
 
-The handoff guarantee applies to entry points routed through `scm.handoff()`
-and to `scm.toggle()` in the opposite direction. A direct command such as
-`Snacks.explorer()`, `:Neotree`, or a standalone SVGTree command bypasses SCM,
-so SCM cannot guarantee mutual exclusion for that invocation. SVGTree remains
-optional; `scm.nvim` does not depend on it or patch its internals.
-
-For `auto`, `sprite`, and `terminal` renderers, an optional
-`on_explorer = function(root) ... end` setup callback lets a host coordinate the
-Explorer action. The callback receives the SCM root and owns closing SCM and
-opening Explorer (use `require('scm').handoff(...)` for deferred replacement).
-Without it, the action hands off to SVGTree when installed.
+`scm.handoff(fn)` closes SCM, then runs `fn` on the next tick, so the two never
+share the screen. `on_explorer` receives SCM's folder if your explorer needs it.
+Without `on_explorer`, Space-e and Ctrl-b show a message instead. A command that
+opens an explorer directly, without `scm.handoff`, can leave both open.
