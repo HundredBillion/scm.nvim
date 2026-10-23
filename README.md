@@ -41,12 +41,14 @@ opening their historical contents awaits prism integration.
 
 ## Repository discovery
 
-SCM finds repositories by walking the Explorer root for `.git` entries. The
-walk skips build output and dependency directories by name so it finishes
-within `discovery_timeout_ms` (default 15000) on large trees. This limit
-covers the walk only; each per-repository git command keeps `timeout_ms`
-(default 5000). The default
-`discovery_exclude` list is `node_modules`, `target`, `.venv`, `venv`,
+SCM finds repositories by walking the Explorer root and stopping at each one, so
+it takes milliseconds even on large trees. Worktrees inside a repository (such as
+`.worktrees/x`) are listed; clones nested inside a repository, like vendored code,
+are not. The walk skips build output and dependency directories by name and must
+finish within `discovery_timeout_ms` (default 15000); each per-repository git
+command keeps `timeout_ms` (default 5000).
+
+The default `discovery_exclude` list is `node_modules`, `target`, `.venv`, `venv`,
 `__pycache__`, `.tox`, `.mypy_cache`, `.pytest_cache`, `.gradle`, `.next`,
 `.terraform`, `.zig-cache`, `zig-cache` and `DerivedData`. A directory with one
 of these names is skipped entirely, so repositories inside it, or a repository
@@ -64,6 +66,12 @@ opts = {
 If discovery still exceeds `discovery_timeout_ms`, SCM shows an error rather
 than a partial list. Add the heavy directory names to `discovery_exclude` or
 raise `discovery_timeout_ms`.
+
+Opening SCM shows the last known changes at once and updates them as each
+repository is rescanned. After startup SCM scans the Explorer root once so even
+the first open is instant; set `warm = false` to turn that off. With lazy.nvim,
+load the plugin at startup (for example `event = "VeryLazy"`) for the warm-up to
+run before the first open.
 
 ## Legacy Snacks install
 

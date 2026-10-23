@@ -36,6 +36,7 @@ jobs:
           nvim -l tests/workspace_test.lua
           nvim -l tests/native_workspace_test.lua
           nvim -l tests/refresh_ordering_test.lua
+          nvim -l tests/warm_test.lua
 
       - name: Check proposed diff for whitespace errors
         if: github.event_name == 'pull_request'

@@ -88,7 +88,8 @@ the containing repository after a save or lazygit exits, or all discovered
 repositories when the user requests it, focus returns to Neovim, or the Panel
 regains focus. Ordinary events reuse discovery for the Explorer Root; an
 explicit Refresh, opening the Panel, or a save under an unknown repository
-rediscovers repository membership.
+rediscovers repository membership. Opening shows the last Repo Entries Core holds
+for the Explorer Root at once and replaces them as each repository's Refresh lands.
 _Avoid_: rescan, reload
 
 ## Standalone renderer migration (2026-10-16)
@@ -113,9 +114,20 @@ explicit Refresh or reopening the Panel.
 
 ## Bounded discovery (2026-10-22)
 
-Discovery skips directories named in `discovery_exclude` (build output and
-dependency trees such as `target` and `node_modules`) below the Explorer Root,
-so it finishes within `discovery_timeout_ms` (15 s by default, separate from
-the per-repository `timeout_ms`) on large trees. Repositories inside an
-excluded directory are not Repo Entries. A discovery that fails or times out is
-an error, never a partial repository list.
+Discovery walks the Explorer Root in-process and stops at every repository: a
+directory holding a `.git` entry is a Repo Entry and is not searched further, and
+neither is an Explorer Root that is itself a repository. Worktrees inside a
+repository (such as `.worktrees/x`) come from `git worktree list` instead; clones
+nested inside a repository (vendored code, test dependencies) are not Repo
+Entries. The walk skips `discovery_exclude` names below the Explorer Root and
+must finish within `discovery_timeout_ms`. A walk that fails or times out is an
+error, never a partial repository list.
+
+## Instant open (2026-10-22)
+
+Opening the Panel never waits on git. Renderers draw Core's cached Repo Entries
+for the Explorer Root immediately, then each repository as its Refresh lands,
+under the "scanning…" title until the last one does. After startup Core scans the
+Explorer Root once (`warm`, on by default) so the first open has rows; it skips
+a root whose Refresh already started. Refreshes that overlap share repository
+scans still waiting in the queue, never ones already running.

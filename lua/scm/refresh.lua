@@ -15,17 +15,24 @@ end
 -- when the run lands, and only the newest request's result is delivered, so a
 -- slow older run can never overwrite newer Repo Entries. State lives on the
 -- owner: generation, refreshing and queued_request.
---   hooks.start(request, done)  begin one run and call done(entries, err) once
+--   hooks.start(request, done, progress)  begin one run and call done(entries, err) once,
+--                               and progress(entries) for partial results before it
 --   hooks.deliver(entries, err) publish the newest result; entries is nil on error
+--   hooks.progress(entries)     optional; render a partial result of the newest run
 --   hooks.alive()               optional; false drops the result and any re-run
 local function run(owner)
   local hooks, request, generation = owner.refresh_hooks, owner.queued_request, owner.generation
   owner.queued_request, owner.refreshing = nil, true
+  local function current()
+    return generation == owner.generation and not (hooks.alive and not hooks.alive())
+  end
   hooks.start(request, function(entries, err)
     owner.refreshing = false
     if hooks.alive and not hooks.alive() then return end
     if generation == owner.generation then hooks.deliver(entries, err) end
     if owner.queued_request then run(owner) end
+  end, function(entries)
+    if hooks.progress and current() then hooks.progress(entries) end
   end)
 end
 
@@ -95,6 +102,22 @@ local function on_lazygit_close(bufname)
       end
     end)
   )
+end
+
+-- Warm-up for every renderer: once startup is over, scan the root SCM would open on.
+-- Deferred so a Panel opened in the same tick (a lazy load on the key) starts first and the
+-- warm-up then skips its root.
+function M.warm(options)
+  if options.warm == false then return end
+  local function run()
+    local root = require("scm.scope").candidate()
+    if root then require("scm.core").warm(root, options) end
+  end
+  if vim.v.vim_did_enter == 1 then
+    vim.defer_fn(run, 0)
+  else
+    vim.api.nvim_create_autocmd("VimEnter", { once = true, callback = function() vim.defer_fn(run, 0) end })
+  end
 end
 
 -- True when the current window is one of the SCM panel's own windows.

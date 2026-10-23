@@ -35,10 +35,14 @@ local policy = require('scm.refresh')
 local function refresh(state, request)
   if active ~= state then return end
   policy.request(state, request, {
-    start = function(pending, done) core.refresh(state.root, options, done, pending) end,
+    start = function(pending, done, progress) core.refresh(state.root, options, done, pending, progress) end,
     deliver = function(entries, err)
       if not err then state.entries = entries end
       state.error = err
+      render(state)
+    end,
+    progress = function(entries)
+      state.entries = entries
       render(state)
     end,
     alive = function() return active == state end,
@@ -113,8 +117,9 @@ function M.toggle()
   local tree = package.loaded.svgtree
   local root = tree and tree.root and tree.root() or scope.current()
   scope.remember(root)
+  -- Start from what Core last saw for this root so the rows show before git answers.
   local state = {root=root, tab=vim.api.nvim_get_current_tabpage(), editor=vim.api.nvim_get_current_win(),
-    entries={}, collapsed={}, selected=1}
+    entries=core.cached(root) or {}, collapsed={}, selected=1}
   if tree and tree.close then tree.close() end
   active = state
   local function on_action(name, index) action(state, name, index) end
@@ -172,5 +177,6 @@ function M.setup(opts)
   end})
   vim.api.nvim_create_autocmd('TabLeave', {group=group, callback=M.close})
   vim.api.nvim_create_user_command('ScmToggle', M.toggle, {force=true})
+  policy.warm(options)
 end
 return M

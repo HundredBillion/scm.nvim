@@ -46,6 +46,7 @@ function M.setup(opts)
   -- Event triggers (lazygit exits, focus) live in their own module; requiring
   -- it here (not at the top) avoids a load-time require cycle.
   require("scm.refresh").setup()
+  require("scm.refresh").warm(M.state.opts)
 end
 
 -- The sidebar layout gives the list window border = "none" (no titlebar to
@@ -232,6 +233,10 @@ function M.open(root)
     state.entries = {}
     require("scm.refresh").reset(state)
   end
+  -- Show what Core last saw for this root at once; the refresh below replaces it.
+  if #state.entries == 0 then
+    state.entries = core.cached(next_root) or {}
+  end
   state.root = next_root
   state.collapsed = {}
   local picker = Snacks.picker.pick({
@@ -353,8 +358,16 @@ end
 -- runs and which result is newest; this only renders it into the tab's picker.
 local function full_refresh_hooks(tab, state)
   return {
-    start = function(request, done) core.refresh(state.root, M.state.opts, done, request) end,
+    start = function(request, done, progress) core.refresh(state.root, M.state.opts, done, request, progress) end,
     alive = function() return vim.api.nvim_tabpage_is_valid(tab) end,
+    progress = function(entries)
+      state.entries = entries
+      local current = picker_for_tab(tab)
+      if current then
+        local anchor, anchor_idx = capture_anchor(current)
+        rerender(current, anchor, anchor_idx)
+      end
+    end,
     deliver = function(entries, err)
       local current = picker_for_tab(tab)
       local anchor, anchor_idx

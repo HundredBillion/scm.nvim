@@ -99,7 +99,7 @@ end)
 vim.wait(5000, function()
   return root_discovered ~= nil
 end, 10)
-eq(root_discovered, { parent_real, deep_real }, "Root repository is deduplicated and nested symlinks are not traversed")
+eq(root_discovered, { parent_real }, "a Root that is a repository is not searched below and is listed once")
 
 local parent_link = tmp .. "/parent-link"
 assert(vim.uv.fs_symlink(parent, parent_link, { dir = true }), "create symlinked Explorer Root")
@@ -111,7 +111,7 @@ end)
 vim.wait(5000, function()
   return linked_discovered ~= nil
 end, 10)
-eq(linked_discovered, { parent_real, deep_real }, "symlinked Explorer Root is canonicalized once before discovery")
+eq(linked_discovered, { parent_real }, "symlinked Explorer Root is canonicalized once before discovery")
 
 local missing_err
 core.discover(root .. "/missing", { timeout_ms = 5000 }, function(_, err)
@@ -154,8 +154,8 @@ eq(heavy_err, nil, "default exclusions still succeed")
 eq(heavy_repos, { heavy_app, heavy_custom, heavy_lib }, "repos inside excluded directories are skipped by default")
 
 local custom_repos = discover_now(heavy, { timeout_ms = 5000, discovery_exclude = { "generated" } })
-local heavy_dep = assert(vim.uv.fs_realpath(heavy .. "/app/node_modules/dep"))
-assert(vim.tbl_contains(custom_repos, heavy_dep), "a custom exclusion list replaces the defaults")
+local heavy_pkg = assert(vim.uv.fs_realpath(heavy .. "/py/.venv/src/pkg"))
+assert(vim.tbl_contains(custom_repos, heavy_pkg), "a custom exclusion list replaces the defaults")
 assert(not vim.tbl_contains(custom_repos, heavy_custom), "a custom exclusion list prunes its own names")
 
 -- An Explorer Root whose own name is excluded is still searched.
@@ -165,54 +165,62 @@ eq(named_root_repos, {
   (assert(vim.uv.fs_realpath(heavy .. "/rust/target/release"))),
 }, "exclusions apply below the Explorer Root, not to the root itself")
 
--- A killed or failed find is an error even when it printed partial results.
+-- discover(): a repository ends the search; clones nested inside it are not listed.
+local stops = vim.fn.tempname()
+local stops_outer = repo_at(stops .. "/outer")
+repo_at(stops .. "/outer/vendor/clone")
+local stops_deep = repo_at(stops .. "/plain/folders/deep")
+eq(discover_now(stops, { timeout_ms = 5000 }), { stops_outer, stops_deep }, "a repository is not searched for nested clones")
+
+-- A walk that runs past its limit is an error even when it already found repositories.
 local real_system = vim.system
-vim.system = function(cmd, opts, cb)
-  if cmd[1] == "find" then
-    vim.schedule(function()
-      cb({ code = 124, signal = 15, stdout = heavy .. "/app/.git\n", stderr = "" })
-    end)
-    return
+local real_scandir = vim.uv.fs_scandir
+vim.uv.fs_scandir = function(dir, cb)
+  if dir:match("/libs$") then
+    return -- this directory never answers
   end
-  return real_system(cmd, opts, cb)
+  return real_scandir(dir, cb)
 end
-local timed_out_repos, timed_out_err = discover_now(heavy, { timeout_ms = 5000 })
-vim.system = real_system
+local timed_out_repos, timed_out_err = discover_now(heavy, { timeout_ms = 5000, discovery_timeout_ms = 50 })
+vim.uv.fs_scandir = real_scandir
 eq(timed_out_repos, nil, "timed-out discovery delivers no partial repository list")
 eq(
   timed_out_err,
-  "repository discovery timed out after 15 s; add large folders to discovery_exclude",
+  "repository discovery timed out after 0.05 s; add large folders to discovery_exclude",
   "timed-out discovery says it timed out and how to fix it"
 )
 
--- A find that fails without stderr still reports a generic error.
-vim.system = function(cmd, opts, cb)
-  if cmd[1] == "find" then
-    vim.schedule(function()
-      cb({ code = 1, signal = 0, stdout = "", stderr = "" })
-    end)
+-- A directory that cannot be read fails discovery; a failure without a message stays generic.
+vim.uv.fs_scandir = function(dir, cb)
+  if dir:match("/libs$") then
+    return real_scandir(dir .. "/missing", cb)
+  end
+  return real_scandir(dir, cb)
+end
+local unreadable_repos, unreadable_err = discover_now(heavy, { timeout_ms = 5000 })
+vim.uv.fs_scandir = function(dir, cb)
+  if dir:match("/libs$") then
+    vim.schedule(function() cb("") end)
     return
   end
-  return real_system(cmd, opts, cb)
+  return real_scandir(dir, cb)
 end
 local _, failed_err = discover_now(heavy, { timeout_ms = 5000 })
-vim.system = real_system
+vim.uv.fs_scandir = real_scandir
+eq(unreadable_repos, nil, "an unreadable directory delivers no partial repository list")
+assert(unreadable_err:match("ENOENT"), "an unreadable directory reports why: " .. tostring(unreadable_err))
 eq(failed_err, "repository discovery failed", "non-timeout failure keeps the generic error")
 
--- The find walk gets its own, longer limit; per-repo git commands keep timeout_ms.
-local function timeouts_for(opts)
-  local seen = {}
-  vim.system = function(cmd, sys_opts, cb)
-    seen[cmd[1]] = sys_opts.timeout
-    return real_system(cmd, sys_opts, cb)
-  end
-  discover_now(heavy, opts)
-  vim.system = real_system
-  return seen
+-- The walk has its own limit and runs no subprocess; git commands keep timeout_ms.
+local seen = {}
+vim.system = function(cmd, sys_opts, cb)
+  seen[cmd[1]] = sys_opts.timeout
+  return real_system(cmd, sys_opts, cb)
 end
+discover_now(heavy, { timeout_ms = 5000 })
+vim.system = real_system
 eq(core.defaults.discovery_timeout_ms, 15000, "discovery allows 15 s by default")
-eq(timeouts_for({ timeout_ms = 5000 }), { find = 15000, git = 5000 }, "find uses the discovery default, git keeps timeout_ms")
-eq(timeouts_for({ timeout_ms = 5000, discovery_timeout_ms = 30000 }), { find = 30000, git = 5000 }, "discovery_timeout_ms is configurable")
+eq(seen, { git = 5000 }, "discovery spawns only git, which keeps timeout_ms")
 
 local worktree_base = vim.fn.tempname()
 local primary_repo = worktree_base .. "/primary"
@@ -240,6 +248,26 @@ local expected_worktrees = {
 }
 table.sort(expected_worktrees)
 eq(worktree_discovered, expected_worktrees, "discovery includes repository directories and worktree .git files")
+
+-- Worktrees git knows about are listed even inside their repository, unlike nested clones.
+-- Worktrees outside the Explorer Root, or whose directory is gone, are not.
+local nested_wt = primary_repo .. "/.worktrees/feature"
+local gone_wt = primary_repo .. "/.worktrees/gone"
+sh({ "git", "-C", primary_repo, "worktree", "add", "-q", "-b", "feature", nested_wt })
+sh({ "git", "-C", primary_repo, "worktree", "add", "-q", "-b", "gone", gone_wt })
+vim.fn.delete(gone_wt, "rf")
+local outside_wt = vim.fn.tempname()
+sh({ "git", "-C", primary_repo, "worktree", "add", "-q", "-b", "outside", outside_wt })
+local primary_real = assert(vim.uv.fs_realpath(primary_repo))
+local nested_real = assert(vim.uv.fs_realpath(nested_wt))
+local nested_expected = vim.list_extend({ nested_real }, expected_worktrees)
+table.sort(nested_expected)
+eq(discover_now(worktree_base, { timeout_ms = 5000 }), nested_expected, "worktrees inside a repository are listed")
+eq(
+  discover_now(primary_repo, { timeout_ms = 5000 }),
+  { primary_real, nested_real },
+  "a Root that is a repository still lists its own worktrees below it"
+)
 
 vim.fn.writefile({ "changed outside Explorer Root" }, linked_worktree .. "/outside.txt")
 local worktree_status
@@ -318,6 +346,50 @@ vim.wait(5000, function()
   return got ~= nil
 end, 10)
 assert(got and #got == 2, "second refresh works")
+
+-- cached(): the last published Repo Entries for a root, for a renderer to show at once.
+eq(core.cached(vim.fn.tempname()), nil, "a root never refreshed has nothing cached")
+eq(core.cached(work), got, "cached entries match the last refresh, in its order")
+eq(core.cached(vim.uv.fs_realpath(work)), got, "cached entries are found through the canonical root too")
+vim.fn.writefile({ "changed too" }, cleanrepo .. "/a.txt")
+got = nil
+core.refresh(work, { timeout_ms = 5000 }, function(entries)
+  got = entries
+end)
+vim.wait(5000, function()
+  return got ~= nil
+end, 10)
+local cached_clean
+for _, entry in ipairs(core.cached(work)) do
+  if entry.name == "clean_repo" then cached_clean = entry end
+end
+eq(#cached_clean.files, 1, "a later refresh replaces the cached entries")
+vim.fn.writefile({ "hello" }, cleanrepo .. "/a.txt")
+
+-- progress: each repository's entry is published as it lands, before the final callback.
+local function refresh_with_progress(dir)
+  local calls, final, late = {}, nil, false
+  core.refresh(dir, { timeout_ms = 5000 }, function(entries)
+    final = entries
+  end, nil, function(entries)
+    if final then late = true end
+    calls[#calls + 1] = vim.tbl_map(function(e) return e.name end, entries)
+  end)
+  vim.wait(5000, function()
+    return final ~= nil
+  end, 10)
+  assert(final, "refresh with progress finished for " .. dir)
+  return calls, late
+end
+local progress_root = vim.fn.tempname()
+repo_at(progress_root .. "/first")
+repo_at(progress_root .. "/second")
+local first_calls, first_late = refresh_with_progress(progress_root)
+eq(#first_calls, 1, "one progress update for two repositories: the last one is the final callback")
+eq(#first_calls[1], 1, "on a new root the first repository shows before the last one lands")
+eq(first_late, false, "no progress arrives after the final callback")
+local again_calls = refresh_with_progress(progress_root)
+eq(again_calls, { { "first", "second" } }, "on a cached root, repositories not rescanned yet keep their cached rows")
 
 -- refresh(): per-repo error path must not short-circuit other repos.
 -- A directory whose `.git` is a bare, uninitialized dir looks like a repo to
@@ -750,8 +822,8 @@ local open_pending = {}
 local open_tab = vim.api.nvim_get_current_tabpage()
 opened_picker.list.win = { win = vim.api.nvim_get_current_win() }
 opened_picker.input.win.win = vim.api.nvim_get_current_win()
-core.refresh = function(root, opts, cb)
-  open_pending[#open_pending + 1] = { root = root, opts = opts, cb = cb }
+core.refresh = function(root, opts, cb, _, progress)
+  open_pending[#open_pending + 1] = { root = root, opts = opts, cb = cb, progress = progress }
   return true
 end
 _G.Snacks = {
@@ -802,6 +874,31 @@ panel_state().entries = nav_entries
 panel_state().collapsed["/repos/dirty"] = true
 eq(#opened_opts.finder(), 5, "open finder honors collapsed state")
 eq(panel.key_actions, nil, "picker actions remain a private implementation detail")
+
+-- Opening shows Core's cached Repo Entries at once, then each repository as it lands.
+local previous_core_cached = core.cached
+local cached_entry, landed_entry = vim.deepcopy(nav_entries[2]), vim.deepcopy(nav_entries[1])
+core.cached = function(root)
+  return root == "/cached/root" and { cached_entry } or nil
+end
+active_picker = nil
+open_pending = {}
+opened_picker = fake_picker({}) -- each open gets a new picker, not yet owned by a tab
+opened_picker.list.win = { win = vim.api.nvim_get_current_win() }
+opened_picker.input.win.win = vim.api.nvim_get_current_win()
+panel.open("/cached/root")
+eq(#open_pending, 1, "the cached open starts one Core request")
+eq(panel_state().entries, { cached_entry }, "open starts from the cached Repo Entries")
+eq(opened_opts.finder()[1].entry, cached_entry, "cached rows are on screen before git answers")
+eq(opened_picker.title, "Source Control (scanning…)", "cached rows are marked as being refreshed")
+open_pending[1].progress({ landed_entry })
+eq(panel_state().entries, { landed_entry }, "a repository that lands replaces the cached rows")
+eq(opened_picker:items()[1].entry, landed_entry, "progress is rendered")
+eq(opened_picker.title, "Source Control (scanning…)", "progress keeps the scanning title")
+open_pending[1].cb({ landed_entry, cached_entry }, nil)
+eq(opened_picker.title, "Source Control", "the final result clears the scanning title")
+core.cached = previous_core_cached
+
 core.refresh = previous_core_refresh
 _G.Snacks = previous_snacks
 

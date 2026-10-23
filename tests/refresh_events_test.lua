@@ -18,6 +18,8 @@ package.loaded['scm.views.terminal'] = {open=function(_, callback)
   return {render=function(_, value) rows=value; renders=renders+1 end, close=function() end}
 end}
 require('scm.scope').current = function() return '/scope' end
+-- The warm-up targets the same root, so opening in the same tick must leave it nothing to do.
+require('scm.scope').candidate = function() return '/scope' end
 local workspace = require('scm.workspace')
 workspace.setup({renderer='terminal', repo_debounce_ms=20})
 workspace.toggle()

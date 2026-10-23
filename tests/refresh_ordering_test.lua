@@ -96,4 +96,40 @@ h.runs[1].done({ { path = "/gone" } }, nil)
 eq(h.delivered, {}, "a closed owner receives nothing")
 eq(#h.runs, 1, "a closed owner does not re-run")
 
+-- Progress: partial results of the newest run reach the renderer; older runs' never do.
+h = harness()
+h.progressed = {}
+h.hooks.progress = function(entries)
+  h.progressed[#h.progressed + 1] = entries
+end
+h.hooks.start = function(request, done, progress)
+  h.runs[#h.runs + 1] = { request = request, done = done, progress = progress }
+end
+h.request(nil)
+h.runs[1].progress({ { path = "/first" } })
+eq(h.progressed, { { { path = "/first" } } }, "the current run's progress is rendered")
+h.request(save("/newer"))
+h.runs[1].progress({ { path = "/superseded" } })
+eq(#h.progressed, 1, "a superseded run's progress is not rendered")
+h.runs[1].done({}, nil)
+h.runs[2].progress({ { path = "/rerun" } })
+eq(h.progressed[2], { { path = "/rerun" } }, "the re-run's progress is rendered")
+refresh.reset(h.owner)
+h.runs[2].progress({ { path = "/old-root" } })
+eq(#h.progressed, 2, "progress after a reset is not rendered")
+h.runs[2].done({}, nil)
+h.request(nil)
+h.alive = false
+h.runs[3].progress({ { path = "/gone" } })
+eq(#h.progressed, 2, "a closed owner receives no progress")
+
+-- A renderer without a progress hook is unaffected by Core's progress calls.
+h = harness()
+h.hooks.start = function(request, done, progress)
+  progress({ { path = "/partial" } })
+  done({ { path = "/all" } }, nil)
+end
+h.request(nil)
+eq(h.delivered, { { entries = { { path = "/all" } } } }, "progress without a hook is ignored")
+
 print("OK refresh ordering")
