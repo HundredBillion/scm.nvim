@@ -32,6 +32,10 @@ The Panel's fuzzy filter, its `d` diff key, and its lazygit keys (`g`, `<CR>` on
 repository header) are removed and not replaced here. The user will build their
 own filter and diff in later sub-projects.
 
+The Panel's "scanning…" title is also removed and not replaced: the standalone
+Panel shows no in-progress indicator. Where a busy signal belongs is part of the
+user's later Panel design.
+
 ## Interface
 
 - `require("scm").setup(opts)` defaults to `renderer = "auto"`. Valid renderers
@@ -41,7 +45,9 @@ own filter and diff in later sub-projects.
 - `require("scm").toggle()`, `.focus(side)`, and `.handoff(fn)` keep their current
   behaviour, always backed by `scm.workspace`.
 - `on_explorer = function(root) ... end` stays the only way the sidebar's explorer
-  key opens a file tree. With no `on_explorer`, the key does nothing.
+  key opens a file tree. With no `on_explorer`, the key shows: `SCM: No file
+  explorer is connected, so there's nothing to open. See "Connecting a file
+  explorer" in the README.`
 - The module `scm.panel` no longer exists. A config that names it fails to load,
   which is intended.
 
@@ -57,8 +63,15 @@ already does so by changing that directory, so the sidebar follows any of them.
 - The per-tab memory (`vim.t.scm_explorer_root`, `scope.remember()`,
   `scope.establish()`) is removed; Neovim's tab- and window-local directories
   replace it.
-- While the sidebar is open, a `DirChanged` event moves it to the new directory and
-  refreshes, showing the new folder's cached rows first when it has any.
+- While the sidebar is open, any `DirChanged` event re-reads the directory of the
+  editor window the Panel tracks (`state.editor`), or the tab's directory when that
+  window is gone. If it differs from the Panel's root, the Panel moves to it and
+  refreshes, showing the new folder's cached rows first when it has any. It calls
+  `policy.reset` first, so a scan of the old directory still running cannot
+  replace the new directory's rows. An `:lcd` in another window (a terminal, a
+  plugin) leaves the Panel where it is. Moving between windows with different
+  local directories fires no `DirChanged`, so the Panel picks up the new window's
+  directory the next time it opens.
 - The startup warm-up scans the current directory at startup.
 
 ## Sharing the left side with a file tree
@@ -80,6 +93,7 @@ screen at a time is the user's config's job, using the existing pieces:
 | `lua/scm/refresh.lua` | Remove the legacy Panel autocmds (save, focus, window enter) and the lazygit `TermClose` re-scan. Keep the refresh policy and the warm-up. |
 | `lua/scm/workspace.lua` | Remove the lazygit `TermClose` trigger, the SVGTree root read and close in `toggle()`, and the SVGTree fallback in the explorer action. Add the `DirChanged` trigger. Keep the save and focus triggers. |
 | `lua/scm/scope.lua` | Reduced to the current-directory rule above. |
+| `lua/scm/core.lua` | Remove the `focus_debounce_ms` default; only the removed Panel triggers read it. Moving the cursor into the Panel no longer refreshes. |
 
 ## Tests
 
@@ -87,9 +101,11 @@ screen at a time is the user's config's job, using the existing pieces:
   Delete the assertions that exercise Snacks picker actions and lazygit calls.
 - `explorer_scope_test`: replaced by a scope test covering `:cd`, `:tcd`, and
   `:lcd`, with a Snacks Explorer, Neo-tree, and SVGTree loaded but ignored.
-- `workspace_test`: the explorer key calls `on_explorer` with the root, and does
-  nothing without it. A `DirChanged` while open re-scans the new directory and
-  shows its cached rows first. A `DirChanged` while closed does nothing.
+- `workspace_test`: the explorer key calls `on_explorer` with the root, and
+  shows the no-explorer message without it. A `:cd`, `:tcd`, or `:lcd` in the editor window while open
+  re-scans the new directory and shows its cached rows first. An `:lcd` in another
+  window leaves the Panel unchanged. A `DirChanged` while closed does nothing. A
+  slow scan of the old directory landing after the move is not rendered.
 - `refresh_events_test`: delete the legacy Panel section.
 - `warm_test`: run only the standalone renderers.
 - `handoff_test`: delete the Panel half; keep the `scm.transition` checks.
@@ -105,9 +121,10 @@ screen at a time is the user's config's job, using the existing pieces:
   It records both decisions: no Snacks, and no file-tree knowledge. ADR 0001 gets
   a "Superseded by 0004" line.
 - README: replace the "Legacy Snacks install" and Snacks Explorer handoff sections
-  with a standalone install and a generic file-tree handoff example.
+  with a standalone install and a "Connecting a file explorer" section (the
+  name the no-explorer message points to) showing a generic handoff example.
 - CONTEXT.md: the Panel and Renderer entries describe the Workspace only. The
-  Explorer Root entry becomes the current-directory rule.
+  Explorer Root entry becomes the Working Directory entry.
 - Drafts of all prose changes are shown before they are applied.
 
 ## User config
