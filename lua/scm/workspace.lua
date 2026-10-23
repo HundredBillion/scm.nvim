@@ -90,9 +90,8 @@ local function action(state, name, index)
   elseif name == 'refresh' then refresh(state)
   elseif name == 'explorer' then
     if options.on_explorer then options.on_explorer(state.root); return end
-    local ok, tree = pcall(require, 'svgtree')
-    if ok then M.handoff(function() tree.open(state.root) end)
-    else vim.notify('SCM: SVGTree is not installed', vim.log.levels.INFO) end
+    vim.notify('SCM: No file explorer is connected, so there\'s nothing to open. See "Connecting a file explorer" in the README.',
+      vim.log.levels.INFO)
   elseif item and (name == 'open' or name == 'expand' or name == 'collapse') then
     if item.kind == 'header' then
       state.collapsed[item.entry.path] = name == 'collapse' or (name == 'open' and not item.collapsed)
@@ -114,13 +113,10 @@ local function action(state, name, index)
 end
 function M.toggle()
   if active then M.close(); return end
-  local tree = package.loaded.svgtree
-  local root = tree and tree.root and tree.root() or scope.current()
-  scope.remember(root)
+  local root = scope.current()
   -- Start from what Core last saw for this root so the rows show before git answers.
   local state = {root=root, tab=vim.api.nvim_get_current_tabpage(), editor=vim.api.nvim_get_current_win(),
     entries=core.cached(root) or {}, collapsed={}, selected=1}
-  if tree and tree.close then tree.close() end
   active = state
   local function on_action(name, index) action(state, name, index) end
   local function ready(view)
@@ -162,18 +158,22 @@ function M.setup(opts)
   highlights()
   local group = vim.api.nvim_create_augroup('ScmWorkspace', {clear=true})
   vim.api.nvim_create_autocmd('ColorScheme', {group=group, callback=highlights})
-  vim.api.nvim_create_autocmd({'BufWritePost','FocusGained','TermClose'}, {group=group, callback=function(ev)
+  vim.api.nvim_create_autocmd({'BufWritePost','FocusGained'}, {group=group, callback=function(ev)
     local state = active
     if not state then return end
     local request = {cached=true}
     if ev.event == 'BufWritePost' then request.paths = {[vim.api.nvim_buf_get_name(ev.buf)]=true} end
-    if ev.event == 'TermClose' then
-      local name = vim.api.nvim_buf_get_name(ev.buf)
-      if not name:find('lazygit', 1, true) then return end
-      local cwd = name:match('^term://(.-)//')
-      if cwd then request.paths = {[vim.fn.expand(cwd)]=true} end
-    end
     policy.event(state, options, request, function(pending) refresh(state, pending) end)
+  end})
+  vim.api.nvim_create_autocmd('DirChanged', {group=group, callback=function()
+    local state = active
+    if not state then return end
+    local root = scope.current(state.editor)
+    if not root or root == state.root then return end
+    policy.reset(state)
+    state.root, state.entries, state.error, state.selected = root, core.cached(root) or {}, nil, 1
+    render(state)
+    refresh(state)
   end})
   vim.api.nvim_create_autocmd('TabLeave', {group=group, callback=M.close})
   vim.api.nvim_create_user_command('ScmToggle', M.toggle, {force=true})

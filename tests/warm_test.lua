@@ -1,4 +1,4 @@
--- Warm-up: after startup, Core scans the Explorer Root once so the first open has rows.
+-- Warm-up: after startup, Core scans the Working Directory once so the first open has rows.
 vim.opt.runtimepath:prepend(vim.uv.cwd())
 local core = require("scm.core")
 local scm = require("scm")
@@ -24,13 +24,13 @@ core.refresh = function(root, ...)
   return real_refresh(root, ...)
 end
 
-for _, renderer in ipairs({ "snacks", "terminal" }) do
+for _, renderer in ipairs({ "auto", "terminal" }) do
   local root = repo()
   vim.cmd.cd(root)
   scm.setup({ renderer = renderer })
   assert(vim.wait(5000, function()
     return core.cached(root) ~= nil
-  end, 10), renderer .. ": warm-up fills the cache for the Explorer Root without opening SCM")
+  end, 10), renderer .. ": warm-up fills the cache for the Working Directory without opening SCM")
   eq(refreshes[root], 1, renderer .. ": warm-up refreshes once")
   scm.setup({ renderer = renderer })
   vim.wait(100)

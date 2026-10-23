@@ -1,5 +1,7 @@
 # Snacks picker as the v1 render layer, not a bare nvim_open_win sidebar
 
+Superseded by [ADR 0004](0004-own-the-sidebar.md).
+
 The parent brief sketched "bare `nvim_create_buf` + `nvim_open_win`, no
 framework dependency" for the panel. We chose a custom snacks picker source
 (with the explorer's sidebar layout) instead: snacks ships with LazyVim (an

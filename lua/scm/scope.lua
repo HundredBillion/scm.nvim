@@ -1,5 +1,6 @@
+-- The Working Directory: Neovim's current directory, which every file explorer
+-- changes when it moves to a folder, so SCM follows any of them without knowing which.
 local M = {}
-local KEY = "scm_explorer_root"
 
 local function normalize(path)
   if type(path) ~= "string" or path == "" then
@@ -12,106 +13,21 @@ local function normalize(path)
   return vim.fs.normalize(real)
 end
 
-function M.remember(path)
-  local root = normalize(path)
-  if not root then
-    return nil, false
+-- The Working Directory of `win` (default: the current window). A window that no
+-- longer exists falls back to the current tab's directory.
+function M.current(win)
+  if win == nil then
+    return normalize(vim.fn.getcwd())
   end
-  local changed = vim.t[KEY] ~= root
-  vim.t[KEY] = root
-  return root, changed
+  if vim.api.nvim_win_is_valid(win) then
+    return normalize(vim.fn.getcwd(win))
+  end
+  return normalize(vim.fn.getcwd(-1, 0))
 end
 
-local function svgtree_root()
-  local visible = false
-  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if
-      vim.api.nvim_win_get_config(win).relative == "" and vim.bo[vim.api.nvim_win_get_buf(win)].filetype == "svgtree"
-    then
-      visible = true
-      break
-    end
-  end
-  if not visible then
-    return nil
-  end
-  local svgtree = package.loaded["svgtree"]
-  if not svgtree or not svgtree.root then
-    return nil
-  end
-  local ok, root = pcall(svgtree.root)
-  return ok and root or nil
-end
-
-local function snacks_root()
-  if not (_G.Snacks and Snacks.picker and Snacks.picker.get) then
-    return nil
-  end
-  local picker = Snacks.picker.get({ source = "explorer" })[1]
-  if not picker then
-    return nil
-  end
-  local ok, root = pcall(function()
-    return picker:cwd()
-  end)
-  if not ok then
-    return nil
-  end
-  return root
-end
-
-local function neotree_root()
-  local manager = package.loaded["neo-tree.sources.manager"]
-  if not manager then
-    return nil
-  end
-  local ok, state = pcall(manager.get_state, "filesystem")
-  if not ok or not state or not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
-    return nil
-  end
-  if vim.api.nvim_win_get_tabpage(state.winid) ~= vim.api.nvim_get_current_tabpage() then
-    return nil
-  end
-  return state.path
-end
-
--- The root establish() would pick, without remembering it on the tab.
+-- The directory the startup warm-up scans.
 function M.candidate()
-  local remembered = normalize(vim.t[KEY])
-  if remembered then
-    return remembered
-  end
-  if _G.LazyVim and LazyVim.root then
-    local ok, value = pcall(LazyVim.root)
-    local root = ok and normalize(value)
-    if root then
-      return root
-    end
-  end
-  return normalize(vim.fn.getcwd())
-end
-
-function M.establish()
-  if not normalize(vim.t[KEY]) then
-    vim.t[KEY] = nil
-  end
-  return M.remember(M.candidate())
-end
-
-function M.current()
-  local remembered = M.remember(snacks_root())
-  if remembered then
-    return remembered
-  end
-  remembered = M.remember(svgtree_root())
-  if remembered then
-    return remembered
-  end
-  remembered = M.remember(neotree_root())
-  if remembered then
-    return remembered
-  end
-  return M.establish()
+  return M.current()
 end
 
 return M
