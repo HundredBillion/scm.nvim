@@ -1,4 +1,4 @@
--- Shared event batching for renderers and legacy Panel event adapters.
+-- Shared event batching for the Panel.
 -- Save bursts retain every affected path; focus and explicit refresh requests cover the whole scope.
 local M = {}
 
@@ -48,7 +48,7 @@ function M.request(owner, request, hooks)
 end
 
 -- Forget queued requests and reject the result of the run in flight, for when
--- what the owner shows changes (a different Explorer Root).
+-- what the owner shows changes (a different Working Directory).
 function M.reset(owner)
   owner.generation = (owner.generation or 0) + 1
   owner.queued_request = nil
@@ -65,45 +65,6 @@ function M.event(owner, options, request, callback)
   end, options.repo_debounce_ms or 150)
 end
 
-local function opts()
-  local panel = require("scm.panel")
-  return panel.state.opts or require("scm.core").defaults
-end
-
--- Legacy focus refreshes are throttled independently for each tab.
-function M.full()
-  local now = vim.uv.now()
-  local previous = vim.t.scm_last_full
-  if previous and now - previous < (opts().focus_debounce_ms or 1500) then
-    return
-  end
-  vim.t.scm_last_full = now
-  require("scm.panel").refresh_view(nil, {cached=true})
-end
-
--- A lazygit terminal exited. Terminal buffer names look like
--- term://{cwd}//{pid}:{cmd} — recover the cwd, resolve its repo root, and
--- refresh just that repo. Full rescan only if recovery fails.
-local function on_lazygit_close(bufname)
-  local cwd = bufname:match("^term://(.-)//")
-  if not cwd or cwd == "" then
-    M.full()
-    return
-  end
-  vim.system(
-    { "git", "-C", vim.fn.expand(cwd), "rev-parse", "--show-toplevel" },
-    { text = true },
-    vim.schedule_wrap(function(out)
-      local root = out.code == 0 and vim.trim(out.stdout or "") or ""
-      if root ~= "" then
-        require("scm.panel").refresh_repo_view(root)
-      else
-        M.full()
-      end
-    end)
-  )
-end
-
 -- Warm-up for every renderer: once startup is over, scan the root SCM would open on.
 -- Deferred so a Panel opened in the same tick (a lazy load on the key) starts first and the
 -- warm-up then skips its root.
@@ -118,71 +79,6 @@ function M.warm(options)
   else
     vim.api.nvim_create_autocmd("VimEnter", { once = true, callback = function() vim.defer_fn(run, 0) end })
   end
-end
-
--- True when the current window is one of the SCM panel's own windows.
-local function in_panel_win(picker)
-  local win = vim.api.nvim_get_current_win()
-  local ok, hit = pcall(function()
-    return (picker.list and picker.list.win and picker.list.win.win == win)
-      or (picker.input and picker.input.win and picker.input.win.win == win)
-  end)
-  return ok and hit
-end
-
-function M.setup()
-  local aug = vim.api.nvim_create_augroup("ScmRefreshTriggers", { clear = true })
-
-  vim.api.nvim_create_autocmd("BufWritePost", {
-    group = aug,
-    callback = function(ev)
-      if not _G.Snacks then return end
-      local panel = require("scm.panel")
-      local picker = Snacks.picker.get({source="scm"})[1]
-      if not picker then return end
-      M.event(picker, opts(), {cached=true, paths={[vim.api.nvim_buf_get_name(ev.buf)]=true}}, function(request)
-        if not picker.closed then panel.refresh_view(picker, request) end
-      end)
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("TermClose", {
-    group = aug,
-    callback = function(ev)
-      local name = vim.api.nvim_buf_get_name(ev.buf)
-      if not name:find("lazygit", 1, true) then
-        return
-      end
-      vim.schedule(function()
-        on_lazygit_close(name)
-      end)
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("WinEnter", {
-    group = aug,
-    callback = function()
-      if not _G.Snacks then
-        return
-      end
-      local p = Snacks.picker.get({ source = "scm" })[1]
-      if p and p._scm_tab and in_panel_win(p) then
-        M.full()
-      end
-    end,
-  })
-
-  vim.api.nvim_create_autocmd("FocusGained", {
-    group = aug,
-    callback = function()
-      if not _G.Snacks then
-        return
-      end
-      if Snacks.picker.get({ source = "scm" })[1] then
-        M.full()
-      end
-    end,
-  })
 end
 
 return M

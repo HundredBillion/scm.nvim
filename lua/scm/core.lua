@@ -11,10 +11,8 @@ M.defaults = {
   -- Minimum ms between two refreshes of the SAME repo (event storms from
   -- autocmds must never stack git processes for one repo).
   repo_debounce_ms = 150,
-  -- Scan the Explorer Root once after startup so the first open already has rows.
+  -- Scan the Working Directory once after startup so the first open already has rows.
   warm = true,
-  -- Minimum ms between two full multi-repo rescans triggered by focus events.
-  focus_debounce_ms = 1500,
   -- Directory names discovery never descends into. Build output and dependency
   -- trees can hold millions of files and would push the walk past discovery_timeout_ms.
   -- A list given in setup replaces this one; {} searches everything.
@@ -24,7 +22,7 @@ M.defaults = {
   },
 }
 
--- Walk the Explorer Root for repositories without a subprocess. A directory holding a
+-- Walk the Working Directory for repositories without a subprocess. A directory holding a
 -- .git entry (a directory, or a worktree's .git file) is a repository and ends the
 -- search there: walking its working tree for nested clones is what made discovery take
 -- seconds. Symlinked and excluded directories are not entered. Calls cb(repos) or
