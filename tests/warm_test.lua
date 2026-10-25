@@ -37,6 +37,33 @@ for _, renderer in ipairs({ "auto", "terminal" }) do
   eq(refreshes[root], 1, renderer .. ": setting up again does not warm a root already scanned")
 end
 
+local staged = repo()
+local function git(...)
+  local out = vim.system({ "git", "-C", staged, ... }):wait()
+  assert(out.code == 0, out.stderr)
+end
+vim.fn.writefile({ "base" }, staged .. "/base.txt")
+git("add", ".")
+git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+git("checkout", "-qb", "feature")
+vim.fn.writefile({ "committed" }, staged .. "/committed.txt")
+git("add", ".")
+git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "feature")
+vim.fn.writefile({ "working" }, staged .. "/working.txt")
+vim.cmd.cd(staged)
+scm.setup({ renderer = "terminal" })
+assert(vim.wait(5000, function()
+  local entries = core.cached(staged)
+  return entries and entries[1] and #entries[1].files > 0
+end, 10), "startup publishes working changes")
+local warm_files = core.cached(staged)[1].files
+eq(#warm_files, 1, "warm-up collects status before committed history")
+eq(warm_files[1].path, "working.txt", "working change is immediately visible")
+local complete
+core.refresh(staged, core.defaults, function(entries) complete = entries end, { cached = true })
+assert(vim.wait(5000, function() return complete ~= nil end, 10), "open completes history")
+eq(#complete[1].files, 2, "opening fills committed history")
+
 -- A refresh started before the warm-up runs (an open right after a lazy load) is not doubled.
 local opened = repo()
 vim.cmd.cd(opened)

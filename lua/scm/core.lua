@@ -11,7 +11,7 @@ M.defaults = {
   -- Minimum ms between two refreshes of the SAME repo (event storms from
   -- autocmds must never stack git processes for one repo).
   repo_debounce_ms = 150,
-  -- Scan the Working Directory once after startup so the first open already has rows.
+  -- Collect working changes after startup so the first open already has rows.
   warm = true,
   -- Directory names discovery never descends into. Build output and dependency
   -- trees can hold millions of files and would push the walk past discovery_timeout_ms.
@@ -288,7 +288,7 @@ end
 -- Build one Repo Entry from a finished `git status` subprocess result. Runs
 -- on the main loop (callers vim.schedule this) — never in vim.system's
 -- fast-event callback context.
-local function build_entry(repo, out, committed, comparison_base)
+local function build_entry(repo, out, committed, comparison_base, comparison_fingerprint)
   local name = repo:match("[^/]+$") or repo
   if out.code == 0 then
     local p = M.parse_status(vim.split(out.stdout or "", "\n", { trimempty = true }))
@@ -302,6 +302,9 @@ local function build_entry(repo, out, committed, comparison_base)
       files = files,
       clean = #files == 0,
       comparison_base = comparison_base,
+      _head_oid = (out.stdout or ""):match("# branch%.oid (%S+)"),
+      _committed = committed,
+      _comparison_fingerprint = comparison_fingerprint,
     }
   end
   local msg = (out.stderr or ""):match("^[^\n]*")
@@ -328,11 +331,22 @@ local function run_git(repo, opts, args, cb)
 end
 
 local comparison_refs = { "refs/remotes/origin/HEAD", "refs/heads/main", "refs/heads/master" }
+local function comparison_fingerprint(repo, opts, cb)
+  local args = { "for-each-ref", "--format=%(refname) %(objectname)" }
+  vim.list_extend(args, comparison_refs)
+  run_git(repo, opts, args, function(out)
+    cb(out.code == 0 and out.stdout or nil)
+  end)
+end
 
-local function resolve_comparison_base(repo, opts, index, cb)
+local function resolve_comparison_base(repo, opts, index, cb, available)
   local ref = comparison_refs[index]
   if not ref then
     cb(nil, nil)
+    return
+  end
+  if available and not available[ref] then
+    resolve_comparison_base(repo, opts, index + 1, cb, available)
     return
   end
   run_git(repo, opts, { "merge-base", ref, "HEAD" }, function(out)
@@ -340,12 +354,20 @@ local function resolve_comparison_base(repo, opts, index, cb)
     if out.code == 0 and base ~= "" then
       cb(base, ref)
     else
-      resolve_comparison_base(repo, opts, index + 1, cb)
+      resolve_comparison_base(repo, opts, index + 1, cb, available)
     end
   end)
 end
 
-local function collect_committed(repo, opts, cb)
+local function collect_committed(repo, opts, cb, fingerprint)
+  local available
+  if fingerprint then
+    available = {}
+    for line in fingerprint:gmatch("[^\n]+") do
+      local ref = line:match("^(%S+) ")
+      if ref then available[ref] = true end
+    end
+  end
   resolve_comparison_base(repo, opts, 1, function(base, default_ref)
     if not base then
       cb({}, nil)
@@ -360,17 +382,30 @@ local function collect_committed(repo, opts, cb)
         cb(out.code == 0 and parse_name_status(out.stdout or "") or {}, base)
       end)
     end)
-  end)
+  end, available)
 end
 
-local function scan_repo(repo, opts, cb)
+local function scan_repo(repo, opts, cb, status_only, partial, prior, reuse_history)
   run_git(repo, opts, { "status", "--porcelain=v2", "--branch" }, function(out)
     if out.code ~= 0 then
       cb(build_entry(repo, out))
       return
     end
-    collect_committed(repo, opts, function(committed, comparison_base)
-      cb(build_entry(repo, out, committed, comparison_base))
+    if status_only then
+      cb(build_entry(repo, out))
+      return
+    end
+    if partial then partial(build_entry(repo, out)) end
+    local oid = (out.stdout or ""):match("# branch%.oid (%S+)")
+    comparison_fingerprint(repo, opts, function(fingerprint)
+      if reuse_history and prior and prior._committed and prior._head_oid == oid
+        and fingerprint and fingerprint == prior._comparison_fingerprint then
+        cb(build_entry(repo, out, prior._committed, prior.comparison_base, fingerprint))
+        return
+      end
+      collect_committed(repo, opts, function(committed, comparison_base)
+        cb(build_entry(repo, out, committed, comparison_base, fingerprint))
+      end, fingerprint)
     end)
   end)
 end
@@ -391,16 +426,23 @@ local function drain_scans()
         cb(entry)
       end
       drain_scans()
-    end)
+    end, job.status_only, function(entry)
+      for _, cb in ipairs(job.partial_cbs) do cb(entry) end
+    end, job.prior, job.reuse_history)
   end
 end
-local function enqueue_scan(repo, opts, cb)
+local function enqueue_scan(repo, opts, cb, status_only, partial, prior, reuse_history)
   local job = queued_scans[repo]
   if job then
     job.cbs[#job.cbs + 1] = cb
+    job.status_only = job.status_only and status_only
+    job.reuse_history = job.reuse_history and reuse_history
+    if prior and prior._committed then job.prior = prior end
+    if partial then job.partial_cbs[#job.partial_cbs + 1] = partial end
     return
   end
-  job = {repo=repo, opts=opts, cbs={cb}}
+  job = {repo=repo, opts=opts, cbs={cb}, status_only=status_only,
+    partial_cbs=partial and {partial} or {}, prior=prior, reuse_history=reuse_history}
   queued_scans[repo] = job
   scan_queue[#scan_queue + 1] = job
   drain_scans()
@@ -471,22 +513,23 @@ function M.cached(root)
   return entries
 end
 
--- Refresh root in the background unless a refresh of it has already started, so a
--- warm-up never queues duplicate scans ahead of the ones a just-opened Panel is waiting on.
+-- Collect status before the first open; committed history can finish after rows appear.
+-- An open during warm-up joins queued scans instead of starting duplicate Git work.
 -- Returns true when it started one. A failure is dropped; the next open reports it.
 function M.warm(root, opts)
   root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
   if scopes[root] then
     return false
   end
-  return M.refresh(root, opts, function() end)
+  return M.refresh(root, opts, function() end, {status_only=true})
 end
 
 -- Omitting request preserves the public full-discovery refresh behavior.
 -- Renderers pass cached=true and optional paths to reuse discovery for ordinary editor events.
 -- progress(entries), when given, is called as each repository lands before the last;
+-- preliminary(entries) publishes a new repository's status before committed history lands.
 -- cb is still called exactly once.
-function M.refresh(root, opts, cb, request, progress)
+function M.refresh(root, opts, cb, request, progress, preliminary)
   root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
   local cached = scopes[root]
   if not cached then
@@ -547,7 +590,10 @@ function M.refresh(root, opts, cb, request, progress)
         elseif progress then
           publish(progress)
         end
-      end)
+      end, request and request.status_only, preliminary and not snapshot[repo] and function(entry)
+        snapshot[repo] = entry
+        publish(preliminary)
+      end, snapshot[repo], request and request.reuse_history)
     end
   end
   if discover then return M.discover(root, opts, collect) end
