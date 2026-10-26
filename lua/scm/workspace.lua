@@ -16,6 +16,7 @@ local function render(state, keep_index)
       local e = item.entry
       text = (item.collapsed and ' ▸ ' or ' ▾ ') .. e.name .. '  ' .. (e.branch or '')
       if e.err then text = text .. '  ! ' .. e.err
+      elseif not e._committed then text = text .. '  …'
       elseif e.clean then text = text .. '  ✓'
       else text = text .. '  (' .. #(e.files or {}) .. ')' end
       hl = e.err and 'DiagnosticWarn' or 'Title'
@@ -35,7 +36,7 @@ local policy = require('scm.refresh')
 local function refresh(state, request)
   if active ~= state then return end
   policy.request(state, request, {
-    start = function(pending, done, progress) core.refresh(state.root, options, done, pending, progress) end,
+    start = function(pending, done, progress) core.refresh(state.root, options, done, pending, progress, progress) end,
     deliver = function(entries, err)
       if not err then state.entries = entries end
       state.error = err
@@ -123,7 +124,7 @@ function M.toggle()
     if active ~= state then view:close(); return end
     state.view=view
     render(state)
-    refresh(state)
+    refresh(state, {cached=true, reuse_history=true})
   end
   local function terminal(err)
     if active ~= state then return end
@@ -173,7 +174,7 @@ function M.setup(opts)
     policy.reset(state)
     state.root, state.entries, state.error, state.selected = root, core.cached(root) or {}, nil, 1
     render(state)
-    refresh(state)
+    refresh(state, {cached=true, reuse_history=true})
   end})
   vim.api.nvim_create_autocmd('TabLeave', {group=group, callback=M.close})
   vim.api.nvim_create_user_command('ScmToggle', M.toggle, {force=true})

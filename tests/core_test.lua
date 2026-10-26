@@ -390,6 +390,25 @@ eq(#first_calls[1], 1, "on a new root the first repository shows before the last
 eq(first_late, false, "no progress arrives after the final callback")
 local again_calls = refresh_with_progress(progress_root)
 eq(again_calls, { { "first", "second" } }, "on a cached root, repositories not rescanned yet keep their cached rows")
+local warm_preliminary, warm_final = 0, false
+core.refresh(progress_root, { timeout_ms = 5000 }, function(entries)
+  warm_final = entries ~= nil
+end, { cached = true }, nil, function()
+  warm_preliminary = warm_preliminary + 1
+end)
+assert(vim.wait(5000, function() return warm_final end, 10), "cached refresh finishes")
+eq(warm_preliminary, 0, "cached entries do not cause redundant preliminary renders")
+local cold_preliminary, cold_final = 0, false
+local cold_root = vim.fn.tempname()
+repo_at(cold_root .. "/new")
+core.refresh(cold_root, { timeout_ms = 5000 }, function(entries)
+  cold_final = entries ~= nil
+end, nil, nil, function(entries)
+  cold_preliminary = cold_preliminary + 1
+  eq(#entries, 1, "cold preliminary status has a visible repository")
+end)
+assert(vim.wait(5000, function() return cold_final end, 10), "cold refresh finishes")
+eq(cold_preliminary, 1, "cold repository publishes preliminary status")
 
 -- refresh(): per-repo error path must not short-circuit other repos.
 -- A directory whose `.git` is a bare, uninitialized dir looks like a repo to
@@ -611,9 +630,41 @@ eq(
   { { path = "committed.txt", commit_status = "A" } },
   "clean feature branch keeps committed file"
 )
+local initial_cached
+core.refresh(croot, ropts, function(entries) initial_cached = entries end)
+assert(vim.wait(5000, function() return initial_cached ~= nil end, 10), "initial history refresh")
+local original_system, cached_git_calls = vim.system, 0
+vim.system = function(args, ...)
+  if args[1] == "git" then cached_git_calls = cached_git_calls + 1 end
+  return original_system(args, ...)
+end
+local reopened
+core.refresh(croot, ropts, function(entries) reopened = entries end,
+  { cached = true, reuse_history = true })
+assert(vim.wait(5000, function() return reopened ~= nil end, 10), "cached reopen refresh")
+vim.system = original_system
+eq(cached_git_calls, 2, "same-HEAD reopen checks status and comparison refs")
+eq(reopened[1].files, committed_entry.files, "same-HEAD reopen retains committed changes")
+local main_before = vim.trim(vim.system({ "git", "-C", croot, "rev-parse", "main" },
+  { text = true }):wait().stdout)
+sh({ "git", "-C", croot, "branch", "-f", "main", "feature" })
+local moved_base
+core.refresh(croot, ropts, function(entries) moved_base = entries end,
+  { cached = true, reuse_history = true })
+assert(vim.wait(5000, function() return moved_base ~= nil end, 10), "moved base refresh")
+eq(moved_base[1].files, {}, "reopen drops committed rows after comparison branch catches up")
+sh({ "git", "-C", croot, "branch", "-f", "main", main_before })
+vim.fn.writefile({ "untracked" }, croot .. "/untracked.txt")
+local changed_on_reopen
+core.refresh(croot, ropts, function(entries) changed_on_reopen = entries end,
+  { cached = true, reuse_history = true })
+assert(vim.wait(5000, function() return changed_on_reopen ~= nil end, 10), "changed reopen refresh")
+eq(changed_on_reopen[1].files, {
+  { path = "committed.txt", commit_status = "A" },
+  { path = "untracked.txt", xy = "??" },
+}, "reopen updates working changes without losing committed history")
 
 vim.fn.writefile({ "pending" }, croot .. "/committed.txt")
-vim.fn.writefile({ "untracked" }, croot .. "/untracked.txt")
 local pending_entry
 assert(core.refresh_repo(croot, ropts, function(entry)
   pending_entry = entry
@@ -625,6 +676,18 @@ eq(pending_entry.files, {
   { path = "committed.txt", xy = ".M" },
   { path = "untracked.txt", xy = "??" },
 }, "pending state overrides committed state by path")
+vim.fn.writefile({ "next" }, croot .. "/next.txt")
+sh({ "git", "-C", croot, "add", "next.txt" })
+sh({ "git", "-C", croot, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "next" })
+local changed_head
+core.refresh(croot, ropts, function(entries) changed_head = entries end,
+  { cached = true, reuse_history = true })
+assert(vim.wait(5000, function() return changed_head ~= nil end, 10), "changed HEAD refresh")
+eq(changed_head[1].files, {
+  { path = "committed.txt", xy = ".M" },
+  { path = "next.txt", commit_status = "A" },
+  { path = "untracked.txt", xy = "??" },
+}, "changed HEAD recomputes committed history")
 
 local fallback_root = vim.fn.tempname()
 vim.fn.mkdir(fallback_root, "p")
