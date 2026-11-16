@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: HundredBillion/sprite.nvim
-          ref: c99a20c4362b81d14f2dce070efb714146d58fcd
+          ref: 92b815273ab08f977fb07ccee719a554ebef2371
           path: .test-deps/sprite.nvim
 
       - name: Install Neovim 0.12.2
