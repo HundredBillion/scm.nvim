@@ -18,6 +18,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check out compatible Sprite plugin API
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: HundredBillion/sprite.nvim
+          ref: c99a20c4362b81d14f2dce070efb714146d58fcd
+          path: .test-deps/sprite.nvim
+
       - name: Install Neovim 0.12.2
         run: |
           curl -fsSLO https://github.com/neovim/neovim/releases/download/v0.12.2/nvim-linux-x86_64.tar.gz
@@ -29,6 +36,8 @@ jobs:
         run: nvim --version
 
       - name: Run SCM headless tests
+        env:
+          SCM_SPRITE_SOURCE: ${{ github.workspace }}/.test-deps/sprite.nvim
         run: |
           nvim -l tests/init_test.lua
           nvim -l tests/no_dependencies_test.lua
@@ -37,6 +46,7 @@ jobs:
           nvim -l tests/scope_test.lua
           nvim -l tests/workspace_test.lua
           nvim -l tests/native_workspace_test.lua
+          nvim -l tests/sprite_pane_address_test.lua
           nvim -l tests/refresh_ordering_test.lua
           nvim -l tests/warm_test.lua
           nvim -l tests/refresh_events_test.lua

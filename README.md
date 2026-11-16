@@ -23,6 +23,11 @@ repository as its Phase 0 track, it now lives here as a standalone plugin.
 native docks; otherwise it opens a Neovim split. `terminal` always uses the
 split. `sprite` also falls back, with a warning.
 
+Native docks require Sprite Terminal 0.6.0+ and `sprite.nvim` v0.5.0+
+(or current `main`). After upgrading Sprite, run
+`:Lazy update scm.nvim sprite.nvim` and restart Neovim. Older adapters reject
+Sprite's window-qualified pane addresses and fall back to the terminal panel.
+
 Use Enter to open a changed file or toggle a repository, h/l to collapse/expand,
 r to refresh, Escape to return to the editor and q to close. Space-e or Ctrl-b
 opens your file explorer once one is connected (see below). The sidebar closes
