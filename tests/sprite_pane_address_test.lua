@@ -1,5 +1,5 @@
 vim.opt.runtimepath:prepend(vim.fn.getcwd())
-local api = assert(vim.env.SCM_SPRITE_SOURCE, 'set SCM_SPRITE_SOURCE')
+local api = vim.fn.fnamemodify(assert(vim.env.SCM_SPRITE_SOURCE, 'set SCM_SPRITE_SOURCE'), ':p')
 vim.opt.runtimepath:prepend(api)
 local host = dofile(api .. '/tests/dock_host.lua').start()
 local root = vim.fn.tempname()
