@@ -586,16 +586,16 @@ eq(shape(model.rows(one, {})), {
 local listed = model.rows(one, { messages = { ["/r/api"] = "fix" } })
 eq(listed[1].label, "fix", "the commit box shows the message being typed")
 eq(listed[4].file, "/r/api/app/models/device.rb", "absolute path for opening the file")
-eq(listed[4].actions, { "open", "unstage" }, "a staged file can be opened or unstaged")
-eq(listed[6].actions, { "open", "discard", "stage" }, "a changed file can be opened, discarded or staged")
+eq(listed[4].actions, { "file", "unstage" }, "a staged file can be opened or unstaged")
+eq(listed[6].actions, { "file", "discard", "stage" }, "a changed file can be opened, discarded or staged")
 eq(listed[8].strikethrough, true, "a deleted file is struck through")
 eq(listed[9].untracked, true, "an untracked file is marked")
-eq(listed[11].actions, { "open" }, "a committed file can only be opened")
+eq(listed[11].actions, { "file" }, "a committed file can only be opened")
 eq(listed[5].actions, { "stage" }, "the Changes group stages")
 assert(listed[4].id ~= listed[7].id, "a Mixed State file has a distinct row in each group")
 eq(
   model.rows({ { name = "r", path = "/r", branch = "main", files = { { path = "ita.lua", xy = ".A" } } } }, {})[4].actions,
-  { "open", "stage" },
+  { "file", "stage" },
   "an intent-to-add file cannot be discarded"
 )
 -- tree view: directories nest, and a chain of single directories is one row

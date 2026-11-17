@@ -22,7 +22,7 @@ end
 function M.toggle() return current().toggle() end
 -- Run a Panel action by name on the selected row, for your own keymaps:
 -- "stage", "unstage", "stage_all", "unstage_all", "discard", "compose",
--- "commit", "view", "fold", "menu", "refresh", "open", "expand", "collapse".
+-- "commit", "view", "fold", "menu", "refresh", "open", "file", "expand", "collapse".
 -- False when the Panel is closed.
 function M.act(name) return current().act(name) end
 function M.handoff(fn) return current().handoff(fn) end

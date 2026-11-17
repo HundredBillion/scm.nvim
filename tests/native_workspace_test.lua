@@ -51,7 +51,11 @@ for _=1,3 do
   row_callbacks[#row_callbacks]()
 end
 request.on_event({type='input', key='enter', text='\n'})
-assert(vim.api.nvim_buf_get_name(0)==vim.uv.fs_realpath(fixture)..'/hello.lua', 'real Sprite enter event opens file')
+local hello=vim.uv.fs_realpath(fixture)..'/hello.lua'
+assert(vim.wait(5000, function() return vim.api.nvim_buf_get_name(0)=='scm://'..hello..' (diff)' end, 20),
+  'real Sprite enter event shows the diff of the file')
+request.on_event({type='input', key='o', text='o'})
+assert(vim.api.nvim_buf_get_name(0)==hello, 'o opens the file itself')
 -- Typing a commit message in the dock: `c` opens the commit box, keys become its text.
 local acked=#row_callbacks
 local function ack()

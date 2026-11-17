@@ -1,4 +1,9 @@
 vim.opt.runtimepath:prepend(vim.uv.cwd())
+-- The windows that hold text: a diff's overview strip floats over its window.
+local function windows()
+  return #vim.tbl_filter(function(win) return vim.api.nvim_win_get_config(win).relative == '' end,
+    vim.api.nvim_tabpage_list_wins(0))
+end
 local root = vim.fn.tempname()
 vim.fn.mkdir(root, 'p')
 root = vim.uv.fs_realpath(root)
@@ -40,8 +45,13 @@ local function press(key)
   mapping.callback()
 end
 press('<CR>')
-assert(vim.api.nvim_buf_get_name(0) == root .. '/sample.lua', 'opens file in editor')
+assert(vim.wait(5000, function() return vim.api.nvim_buf_get_name(0) == 'scm://' .. root .. '/sample.lua (diff)' end, 20),
+  'Enter shows the diff of the file in the editor')
 assert(vim.api.nvim_get_current_win() ~= win, 'sidebar is preserved')
+vim.api.nvim_set_current_win(win)
+press('o')
+assert(vim.api.nvim_buf_get_name(0) == root .. '/sample.lua', 'o opens the file itself, over its diff')
+assert(vim.api.nvim_get_current_win() ~= win and windows() == 2, 'no window is added')
 vim.fn.writefile({'new'}, root .. '/second.lua')
 vim.api.nvim_exec_autocmds('FocusGained', {})
 assert(vim.wait(5000, function()

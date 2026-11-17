@@ -59,7 +59,8 @@ tree.
 | Key | Action |
 | --- | --- |
 | `j` / `k`, arrows | Move the selection. |
-| Enter | Open a file, toggle a group or folder, type in the commit box, or press Commit. |
+| Enter | Show a file's diff, toggle a group or folder, type in the commit box, or press Commit. |
+| `o` | Open the file itself. |
 | `h` / `l` | Collapse / expand; `h` on a file selects its group or folder. |
 | `s` | Stage the file, folder, or group under the cursor. |
 | `u` | Unstage the file, folder, or group under the cursor. |
@@ -76,7 +77,7 @@ tree.
 A key acts only on what its row shows: `s` on the Staged Changes group does
 nothing, and a key pressed on the title line acts on no file.
 
-In the native dock, the same actions are buttons. Hover a file for open,
+In the native dock, the same actions are buttons. Click a file for its diff; hover it for open file,
 discard and stage; hover a group or folder to stage or unstage all of it; the
 "Changes" header has list/tree, commit, refresh and the menu. Click the commit
 box to type in it: Enter moves to the Commit button, Escape stops typing, and
@@ -87,10 +88,46 @@ it, as VS Code does. A commit that fails keeps your message.
 
 To bind an action to your own key, call `require("scm").act(name)` with
 `stage`, `unstage`, `stage_all`, `unstage_all`, `discard`, `compose`, `commit`,
-`view`, `fold`, `menu`, `refresh`, `open`, `expand` or `collapse`.
+`view`, `fold`, `menu`, `refresh`, `open`, `file`, `expand` or `collapse`.
 
 The sidebar closes when leaving its tab. It refreshes after editor writes,
 when Neovim regains focus, and after every action it runs.
+
+## Diffs
+
+Selecting a file shows its diff in the editor window: the whole file, with
+removed lines in red above the added lines in green and the changed part of a
+line marked more strongly. The gutter numbers lines as the new file does; a
+removed line has a `-` and no number, an added line a `+`.
+
+| File under | Compares |
+| --- | --- |
+| Changes | What is staged against the file on disk. Untracked files are all added; deleted files are all removed. |
+| Staged Changes | The last commit against what is staged. |
+| Committed | Where the branch left the default branch against its last commit. |
+
+A file under Merge Changes opens as itself, so its conflict markers can be
+edited.
+
+A strip down the right edge is an overview of the whole file: green where
+lines were added, red where they were removed, and a lighter band for the
+part on screen.
+
+The header names the file and what it is compared with, counts added and
+removed lines, and has buttons for the previous and next change and for
+opening the file.
+
+| Key in a diff | Action |
+| --- | --- |
+| `]c` / `[c` | Next / previous change. |
+| Enter, `gf` | Open the file at the line under the cursor. |
+
+A diff is read-only and is replaced by the next file you select. It is
+compared again whenever the panel refreshes. Its colours are the highlight
+groups `ScmDiffAdd`, `ScmDiffDelete`, `ScmDiffAddText` and
+`ScmDiffDeleteText`, and `ScmDiffRulerAdd` and `ScmDiffRulerDelete` for the
+strip, mixed from VS Code's diff colours and your colour
+scheme's background.
 
 ## Options
 
@@ -110,9 +147,8 @@ Material theme that `svgtree.nvim` bundles when that plugin is installed, by
 reading its icon files only; it never loads svgtree. Without a theme, files
 and folders get plain outline icons.
 
-The panel does not yet show diffs, filter, look up PR targets, or watch the
-filesystem. Deleted files are listed; opening their historical contents is not
-yet supported. A commit message is one line.
+The panel does not yet filter, look up PR targets, or watch the filesystem. A
+commit message is one line.
 
 ## Which folder is scanned
 
