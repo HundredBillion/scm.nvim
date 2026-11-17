@@ -19,6 +19,7 @@ local function line(row, ui, width)
     local left = math.max(0, math.floor((width - vim.fn.strdisplaywidth(text)) / 2))
     return {text=string.rep(' ', left) .. text, marks={}, line_hl='ScmButton'}
   elseif kind == 'note' then
+    if not row.error then return {text=' ' .. pad .. label, marks={{0, -1, 'ScmDescription'}}} end
     return {text=' ' .. pad .. '! ' .. label, marks={{0, -1, 'DiagnosticWarn'}}}
   end
   -- A row that cannot expand keeps a chevron's width so labels line up, except
