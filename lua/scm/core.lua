@@ -22,6 +22,19 @@ M.defaults = {
   },
 }
 
+-- Git prints a path holding non-ASCII bytes as a quoted, escaped string unless
+-- told not to. Paths are shown to the user and handed back to git, so they
+-- must be the real names. Set through the environment, which leaves the
+-- command line as it was.
+--
+-- Core only reads. `git status` would otherwise take the index lock to save a
+-- refreshed index, and a stage or commit the user starts at that moment would
+-- fail on the lock; GIT_OPTIONAL_LOCKS=0 is git's switch for background readers.
+M.git_env = {
+  GIT_CONFIG_COUNT = "1", GIT_CONFIG_KEY_0 = "core.quotepath", GIT_CONFIG_VALUE_0 = "false",
+  GIT_OPTIONAL_LOCKS = "0",
+}
+
 -- Walk the Working Directory for repositories without a subprocess. A directory holding a
 -- .git entry (a directory, or a worktree's .git file) is a repository and ends the
 -- search there: walking its working tree for nested clones is what made discovery take
@@ -122,7 +135,8 @@ function M.parse_status(lines)
     elseif first == "2" then
       local xy, rest = l:match("^2 (..) %S+ %S+ %S+ %S+ %S+ %S+ %S+ (.+)$")
       if xy then
-        files[#files + 1] = { path = rest:match("^([^\t]+)"), xy = xy }
+        -- A rename or copy lists the new path, a tab, then the path it came from.
+        files[#files + 1] = { path = rest:match("^([^\t]+)"), orig = rest:match("\t(.+)$"), xy = xy }
       end
     elseif first == "u" then
       local xy, path = l:match("^u (..) %S+ %S+ %S+ %S+ %S+ %S+ %S+ %S+ (.+)$")
@@ -323,7 +337,7 @@ end
 local function run_git(repo, opts, args, cb)
   local cmd = { "git", "-C", repo }
   vim.list_extend(cmd, args)
-  vim.system(cmd, { text = true, timeout = opts.timeout_ms }, function(out)
+  vim.system(cmd, { text = true, timeout = opts.timeout_ms, env = M.git_env }, function(out)
     vim.schedule(function()
       cb(out)
     end)
@@ -386,7 +400,9 @@ local function collect_committed(repo, opts, cb, fingerprint)
 end
 
 local function scan_repo(repo, opts, cb, status_only, partial, prior, reuse_history)
-  run_git(repo, opts, { "status", "--porcelain=v2", "--branch" }, function(out)
+  -- Every untracked file is listed by name, as VS Code lists them, where git
+  -- would otherwise show a new directory as one entry.
+  run_git(repo, opts, { "status", "--porcelain=v2", "--branch", "--untracked-files=all" }, function(out)
     if out.code ~= 0 then
       cb(build_entry(repo, out))
       return

@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: HundredBillion/sprite.nvim
-          ref: 92b815273ab08f977fb07ccee719a554ebef2371
+          ref: 8f6bef1633c3f2f11450747d3023269c979a43a7
           path: .test-deps/sprite.nvim
 
       - name: Install Neovim 0.12.2
@@ -53,6 +53,8 @@ jobs:
           nvim -l tests/refresh_races_test.lua
           nvim -l tests/refresh_policy_test.lua
           nvim -l tests/sprite_busy_input_test.lua
+          nvim -l tests/native_view_test.lua
+          nvim -l tests/actions_test.lua
 
       - name: Check proposed diff for whitespace errors
         if: github.event_name == 'pull_request'

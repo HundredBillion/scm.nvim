@@ -34,7 +34,7 @@ eq(parsed.files, {
   { path = "app/models/device.rb", xy = ".M" },
   { path = "lib/staged_and_edited.rb", xy = "MM" },
   { path = "lib/staged_only.rb", xy = "M." },
-  { path = "lib/new_name.rb", xy = "R." },
+  { path = "lib/new_name.rb", orig = "lib/old_name.rb", xy = "R." },
   { path = "conflicted.rb", xy = "UU" },
   { path = "scratch.rb", xy = "??" },
 }, "files (raw xy preserved, rename keeps NEW path, one entry per file)")
@@ -515,58 +515,126 @@ eq(
 
 local model = require("scm.model")
 
--- xy_display: letter = working-tree state, else index state; mixed marker
-eq(model.xy_display(".M"), { letter = "M", mixed = false, hl = "ScmModified" }, "unstaged modified")
-eq(model.xy_display("M."), { letter = "M", mixed = false, hl = "ScmStaged" }, "staged only")
-eq(model.xy_display("MM"), { letter = "M", mixed = true, hl = "ScmModified" }, "mixed state")
-eq(model.xy_display("??"), { letter = "??", mixed = false, hl = "ScmUntracked" }, "untracked")
-eq(model.xy_display("R."), { letter = "R", mixed = false, hl = "ScmStaged" }, "staged rename")
-eq(model.xy_display(".D"), { letter = "D", mixed = false, hl = "ScmDeleted" }, "deleted")
-eq(model.xy_display("UU"), { letter = "U", mixed = true, hl = "ScmConflict" }, "conflict")
-eq(model.xy_display("DD"), { letter = "D", mixed = true, hl = "ScmConflict" }, "unmerged: both deleted")
-eq(model.xy_display("AU"), { letter = "U", mixed = true, hl = "ScmConflict" }, "unmerged: added by us")
-eq(model.xy_display("UD"), { letter = "D", mixed = true, hl = "ScmConflict" }, "unmerged: deleted by them")
-eq(model.xy_display("UA"), { letter = "A", mixed = true, hl = "ScmConflict" }, "unmerged: added by them")
-eq(model.xy_display("DU"), { letter = "U", mixed = true, hl = "ScmConflict" }, "unmerged: deleted by us")
-eq(model.xy_display("AA"), { letter = "A", mixed = true, hl = "ScmConflict" }, "unmerged: both added")
-eq(model.file_display({ path = "committed.lua", commit_status = "M" }), {
-  letter = "M",
-  marker = "✓",
-  hl = "ScmCommitted",
-}, "committed-only display")
-eq(model.file_display({ path = "pending.lua", xy = "M." }), {
-  letter = "M",
-  marker = " ",
-  hl = "ScmStaged",
-}, "pending display unchanged")
-
--- build_items: headers + files, self-identifying ctx, dup detection, sort order
-local entries = {
-  {
-    name = "api",
-    path = "/r/api",
-    branch = "main",
-    ahead = 1,
-    behind = 0,
-    clean = false,
-    files = { { path = "app/models/device.rb", xy = ".M" }, { path = "top.rb", xy = "??" } },
-  },
-  { name = "api", path = "/other/api", branch = "dev", ahead = 0, behind = 0, clean = true, files = {} },
-  { name = "web", path = "/r/web", branch = "main", ahead = 0, behind = 0, clean = true, files = {} },
-}
-local items = model.build_items(entries)
-eq(#items, 5, "3 headers + 2 files")
-eq(items[1].kind, "header", "header first")
-eq(items[1].dup, true, "name collision flagged")
-eq(items[2].kind, "file", "file after its header")
-eq(items[2].text, "api/app/models/device.rb", "match text includes repo")
-eq(items[2].ctx, "api/app/models", "ctx column repo/dir")
-eq(items[2].file, "/r/api/app/models/device.rb", "absolute path for opening the file")
-eq(items[3].ctx, "api", "top-level file ctx = repo only")
-eq(items[5].dup, nil, "unique name not flagged")
-for i, it in ipairs(items) do
-  eq(it.sort, i, "sort field " .. i)
+-- badge: the letter and highlight of a File Entry in each Change Group
+local function badge(group, entry)
+  local look, gone = model.badge(group, entry)
+  return look and { look.text, look.hl, gone } or nil
 end
+eq(badge("changes", { xy = ".M" }), { "M", "ScmModified", false }, "unstaged modified")
+eq(badge("staged", { xy = ".M" }), nil, "an unstaged change is not staged")
+eq(badge("staged", { xy = "M." }), { "M", "ScmModified", false }, "staged only")
+eq(badge("changes", { xy = "M." }), nil, "a staged change has nothing left in the working tree")
+eq(badge("staged", { xy = "MM" }), { "M", "ScmModified", false }, "Mixed State is staged")
+eq(badge("changes", { xy = "MM" }), { "M", "ScmModified", false }, "and Mixed State is also a change")
+eq(badge("changes", { xy = "??" }), { "U", "ScmUntracked", false }, "untracked")
+eq(badge("staged", { xy = "??" }), nil, "untracked is never staged")
+eq(badge("staged", { xy = "R." }), { "R", "ScmRenamed", false }, "staged rename")
+eq(badge("staged", { xy = "A." }), { "A", "ScmAdded", false }, "staged addition")
+eq(badge("changes", { xy = ".D" }), { "D", "ScmDeleted", true }, "a deleted file is struck through")
+eq(badge("staged", { xy = "D." }), { "D", "ScmDeleted", true }, "a staged deletion too")
+for _, xy in ipairs({ "DD", "AU", "UD", "UA", "DU", "AA", "UU" }) do
+  eq(badge("merge", { xy = xy }), { "!", "ScmConflict", false }, "unmerged " .. xy)
+  eq(badge("staged", { xy = xy }), nil, "unmerged " .. xy .. " is not staged")
+  eq(badge("changes", { xy = xy }), nil, "unmerged " .. xy .. " is not an ordinary change")
+end
+eq(badge("committed", { commit_status = "M" }), { "M", "ScmCommitted", false }, "committed")
+eq(badge("committed", { commit_status = "D" }), { "D", "ScmCommitted", true }, "committed deletion")
+eq(badge("changes", { commit_status = "M" }), nil, "a Committed File Entry is in no pending group")
+eq(badge("committed", { xy = ".M" }), nil, "a Pending File Entry is not committed")
+eq(
+  model.group_paths({ files = { { path = "new.lua", orig = "old.lua", xy = "R." }, { path = "x.lua", xy = ".M" } } }, "staged"),
+  { "new.lua", "old.lua" },
+  "a staged rename is unstaged under both names"
+)
+
+-- rows: one repository lists its commit box, button and Change Groups with no repository row
+local function shape(rows)
+  local out = {}
+  for i, r in ipairs(rows) do
+    out[i] = ("%d %s %s"):format(r.depth, r.kind, r.label)
+      .. (r.description and (" (" .. r.description .. ")") or "")
+      .. (r.badge and (" " .. r.badge.text) or "")
+      .. (r.count and (" #" .. r.count) or "")
+  end
+  return out
+end
+local one = {
+  {
+    name = "api", path = "/r/api", branch = "main", ahead = 0, behind = 0, clean = false,
+    files = {
+      { path = ".gitignore", xy = ".M" },
+      { path = "app/models/device.rb", xy = "MM" },
+      { path = "app/models/old.rb", xy = ".D" },
+      { path = "app/views/new.erb", xy = "??" },
+      { path = "docs/done.md", commit_status = "M" },
+    },
+  },
+}
+eq(shape(model.rows(one, {})), {
+  "0 input ",
+  "0 button Commit",
+  "0 group Staged Changes #1",
+  "1 file device.rb (app/models) M",
+  "0 group Changes #4",
+  "1 file .gitignore M",
+  "1 file device.rb (app/models) M",
+  "1 file old.rb (app/models) D",
+  "1 file new.erb (app/views) U",
+  "0 group Committed #1",
+  "1 file done.md (docs) M",
+}, "list view")
+local listed = model.rows(one, { messages = { ["/r/api"] = "fix" } })
+eq(listed[1].label, "fix", "the commit box shows the message being typed")
+eq(listed[4].file, "/r/api/app/models/device.rb", "absolute path for opening the file")
+eq(listed[4].actions, { "open", "unstage" }, "a staged file can be opened or unstaged")
+eq(listed[6].actions, { "open", "discard", "stage" }, "a changed file can be opened, discarded or staged")
+eq(listed[8].strikethrough, true, "a deleted file is struck through")
+eq(listed[9].untracked, true, "an untracked file is marked")
+eq(listed[11].actions, { "open" }, "a committed file can only be opened")
+eq(listed[5].actions, { "stage" }, "the Changes group stages")
+assert(listed[4].id ~= listed[7].id, "a Mixed State file has a distinct row in each group")
+eq(
+  model.rows({ { name = "r", path = "/r", branch = "main", files = { { path = "ita.lua", xy = ".A" } } } }, {})[4].actions,
+  { "open", "stage" },
+  "an intent-to-add file cannot be discarded"
+)
+-- tree view: directories nest, and a chain of single directories is one row
+eq(shape(model.rows(one, { mode = "tree" })), {
+  "0 input ",
+  "0 button Commit",
+  "0 group Staged Changes #1",
+  "1 dir app/models",
+  "2 file device.rb M",
+  "0 group Changes #4",
+  "1 dir app",
+  "2 dir models",
+  "3 file device.rb M",
+  "3 file old.rb D",
+  "2 dir views",
+  "3 file new.erb U",
+  "1 file .gitignore M",
+  "0 group Committed #1",
+  "1 dir docs",
+  "2 file done.md M",
+}, "tree view")
+local tree_rows = model.rows(one, { mode = "tree" })
+eq(tree_rows[4].paths, { "app/models" }, "a compacted directory stages its whole path")
+eq(
+  shape(model.rows(one, { mode = "tree", collapsed = { [tree_rows[7].id] = true, [tree_rows[3].id] = true } })),
+  {
+    "0 input ",
+    "0 button Commit",
+    "0 group Staged Changes #1",
+    "0 group Changes #4",
+    "1 dir app",
+    "1 file .gitignore M",
+    "0 group Committed #1",
+    "1 dir docs",
+    "2 file done.md M",
+  },
+  "a collapsed group or directory hides what is under it"
+)
+eq(model.rows(one, { folded = true }), {}, "folding the section hides every row")
 
 -- refresh_repo(): scoped single-repo refresh with debounce + coalescing
 local rwork = vim.fn.tempname()
@@ -769,64 +837,48 @@ end, 10)
 assert(bad_entry and bad_entry.err and #bad_entry.err > 0, "scoped error entry has err")
 eq(bad_entry.files, {}, "scoped error entry has no files")
 
--- Repository Section collapse navigation: visible rows, glyphs, h/l, confirm,
--- filtered-header fallback, inert headers, and session-local state.
-local nav_entries = {
+-- Several repositories: each is a collapsible Repository Section, and only one
+-- with something to commit has a commit box.
+local many = {
   {
-    name = "dirty",
-    path = "/repos/dirty",
-    branch = "main",
-    ahead = 0,
-    behind = 0,
-    clean = false,
-    files = {
-      { path = "one.lua", xy = ".M" },
-      { path = "two.lua", xy = "??" },
-    },
+    name = "dirty", path = "/repos/dirty", branch = "main", ahead = 2, behind = 1, clean = false,
+    files = { { path = "one.lua", xy = ".M" }, { path = "two.lua", xy = "??" } },
+  },
+  { name = "clean", path = "/repos/clean", branch = "main", ahead = 0, behind = 0, clean = true, files = {} },
+  {
+    name = "broken", path = "/repos/broken", branch = "?", ahead = 0, behind = 0, clean = true,
+    err = "status failed", files = {},
   },
   {
-    name = "clean",
-    path = "/repos/clean",
-    branch = "main",
-    ahead = 0,
-    behind = 0,
-    clean = true,
-    files = {},
-  },
-  {
-    name = "broken",
-    path = "/repos/broken",
-    branch = "?",
-    ahead = 0,
-    behind = 0,
-    clean = true,
-    err = "status failed",
-    files = {},
-  },
-  {
-    name = "dirty",
-    path = "/other/dirty",
-    branch = "dev",
-    ahead = 0,
-    behind = 0,
-    clean = false,
-    files = { { path = "other.lua", xy = ".M" } },
+    name = "landed", path = "/other/landed", branch = "dev", ahead = 0, behind = 0, clean = false,
+    files = { { path = "other.lua", commit_status = "A" } },
   },
 }
-
-local collapsed = {}
-local function nav_items()
-  return model.build_items(nav_entries, collapsed)
-end
-
-local expanded_nav = nav_items()
-eq(#expanded_nav, 7, "expanded Repository Sections include their files")
-eq(expanded_nav[1].collapsed, false, "expanded header state")
-collapsed["/repos/dirty"] = true
-local collapsed_nav = nav_items()
-eq(#collapsed_nav, 5, "collapsed Repository Section hides only its files")
-eq(collapsed_nav[1].collapsed, true, "collapsed header state")
-eq(collapsed_nav[2].collapsed, false, "clean header is never collapsible")
-eq(collapsed_nav[3].collapsed, false, "error header is never collapsible")
+eq(shape(model.rows(many, {})), {
+  "0 repo dirty (main ↑2 ↓1) #2",
+  "1 input ",
+  "1 button Commit",
+  "1 group Changes #2",
+  "2 file one.lua M",
+  "2 file two.lua U",
+  "0 repo clean (main)",
+  "0 repo broken (?)",
+  "1 note status failed",
+  "0 repo landed (dev) #1",
+  "1 group Committed #1",
+  "2 file other.lua A",
+}, "expanded Repository Sections")
+local sections = model.rows(many, {})
+eq(sections[1].expanded, true, "a repository with files is expanded")
+eq(sections[7].expanded, nil, "a clean repository cannot be collapsed")
+eq(sections[8].expanded, true, "a repository with an error shows it when expanded")
+eq(shape(model.rows(many, { collapsed = { [sections[1].id] = true, [sections[8].id] = true } })), {
+  "0 repo dirty (main ↑2 ↓1) #2",
+  "0 repo clean (main)",
+  "0 repo broken (?)",
+  "0 repo landed (dev) #1",
+  "1 group Committed #1",
+  "2 file other.lua A",
+}, "a collapsed Repository Section hides only its own rows")
 
 print("OK")

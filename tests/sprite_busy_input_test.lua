@@ -4,6 +4,7 @@ local request
 local row_callbacks = {}
 local actions = {}
 local dock = {
+	features = { ["virtual-list-rows-v2"] = true },
 	assets = function(_, _, done)
 		done()
 	end,
@@ -42,7 +43,7 @@ end, function(err)
 end)
 assert(opened == view and not failed, "native dock opens")
 
-local rows = { { id = "first", text = "First" }, { id = "second", text = "Second" } }
+local rows = { { id = "first", label = "First" }, { id = "second", label = "Second" } }
 view:render(rows, 1)
 assert(#row_callbacks == 1 and row_callbacks[1].revision == 1)
 request.on_event({ type = "input", key = "down" })
@@ -66,7 +67,7 @@ assert(
 request.on_event({ type = "list_click", revision = 1, button = "left", id = "first" })
 assert(#actions == 1, "stale list revisions remain ignored")
 
-local newest_rows = { { id = "newest", text = "Newest" } }
+local newest_rows = { { id = "newest", label = "Newest" } }
 view:render(rows, 1)
 request.on_event({ type = "input", key = "enter", text = "\n" })
 view:render(newest_rows, 1)
@@ -81,7 +82,7 @@ assert(
 
 view:render({}, 1)
 request.on_event({ type = "input", key = "enter", text = "\n" })
-local restored_rows = { { id = "restored", text = "Restored" } }
+local restored_rows = { { id = "restored", label = "Restored" } }
 view:render(restored_rows, 1)
 row_callbacks[5].done()
 assert(#actions == 2, "activation survives an empty acknowledgement while populated rows are pending")
