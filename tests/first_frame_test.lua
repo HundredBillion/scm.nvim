@@ -50,7 +50,7 @@ vim.system = function(cmd, ...)
   if cmd[1] == 'git' then events[#events + 1] = 'git' end
   return real_system(cmd, ...)
 end
-package.loaded.sprite = {open=function(_, cb)
+local first_fake = {open=function(_, cb)
   cb(nil, {
     features={['virtual-list-rows-v2']=true},
     assets=function(_, entries, done)
@@ -67,6 +67,7 @@ package.loaded.sprite = {open=function(_, cb)
     close=function() end,
   })
 end}
+package.loaded.sprite = first_fake
 local function ack() while #waiting > 0 do table.remove(waiting, 1)() end end
 
 local scm = require('scm')
@@ -98,8 +99,46 @@ end
 assert(first_git > 2, 'the rescan starts after the first screen, at event ' .. first_git)
 scm.toggle()
 
+-- A waiter that renders at once finds the frame it waited for recorded, and
+-- its own rows are the ones the view ends on.
+do
+  local sent, acks = {}, {}
+  package.loaded.sprite = {open=function(_, cb)
+    cb(nil, {
+      features={['virtual-list-rows-v2']=true},
+      assets=function(_, _, done) done() end,
+      rows=function(_, revision, rows, _, done) sent[#sent + 1] = {revision=revision, count=#rows}; acks[#acks + 1] = done end,
+      state=function(_, _, _, done) done() end,
+      focus=function(_, done) if done then done() end end,
+      focus_editor=function(_, done) if done then done() end end,
+      close=function() end,
+    })
+  end}
+  local function rows_of(count, prefix)
+    local list = {}
+    for i = 1, count do list[i] = {id=prefix .. i, kind='file', depth=0, label=prefix .. i} end
+    return list
+  end
+  local view, recorded
+  view = sprite_view.open({}, function() end, function(opened)
+    opened:render(rows_of(3, 'old'), 1, {})
+    opened:after_frame(function()
+      recorded = opened.applied
+      opened:render(rows_of(5, 'new'), 2, {})
+    end)
+  end, function(err) error(vim.inspect(err)) end)
+  while #acks > 0 do table.remove(acks, 1)() end
+  assert(recorded == sent[1].revision, 'the frame is recorded before its waiters run')
+  assert(#sent == 2 and sent[1].count == 3 and sent[2].count == 5 and sent[2].revision > sent[1].revision,
+    'the waiter\'s rows follow the frame it waited for, got ' .. vim.inspect(sent))
+  assert(#view.rows_value == 5 and view:selection() == 2 and view.applied == sent[2].revision,
+    'the view ends on the waiter\'s rows')
+  view:close()
+end
+
 -- A short list is sent whole, once.
 vim.system = real_system
+package.loaded.sprite = first_fake
 local small = vim.fn.tempname()
 vim.fn.mkdir(small, 'p')
 assert(vim.system({'git', '-C', small, 'init', '-q', '-b', 'main'}):wait().code == 0)

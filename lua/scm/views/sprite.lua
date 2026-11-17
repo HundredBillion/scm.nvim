@@ -289,13 +289,12 @@ function M.open(opts, action, ready, failed)
         view.busy=false
         if err then fail(err); return end
         view.sent={rows=rows, selected=selected}
-        -- The rest of a list that opened on its first screen, unless newer rows wait.
-        if whole and not view.pending then view.pending = whole end
-        frame_landed()
         view.rows_value=next_rows.rows
         view.ui=ui
         view.selected=next_rows.index
         view.applied=revision
+        -- The rest of a list that opened on its first screen, unless newer rows wait.
+        if whole and not view.pending then view.pending = whole end
         if not view.focused then
           view.focused=true
           view.dock:focus(function(e) if e then fail(e) end end)
@@ -314,6 +313,8 @@ function M.open(opts, action, ready, failed)
           view.queued_activation=nil
           if view.rows_value[view.selected] then action('open', view.selected) end
         end
+        -- Run last: a waiter may render, and must find this frame recorded.
+        frame_landed()
         flush()
       end)
     end)
@@ -441,9 +442,9 @@ function M.open(opts, action, ready, failed)
     -- The header's icons are registered with the first frame's, in one
     -- message sent at once. The host is busy for a moment after it opens a
     -- dock, and a second message would wait that out before any row showed.
-    local rendered = view.pending ~= nil
     ready(view)
-    if not rendered and not view.pending and not view.busy and not view.closed then register(assets, function() end) end
+    -- With no frame on its way, the header's icons are registered alone.
+    if not view.busy and not view.closed then register(assets, function() end) end
   end)
   return view
 end

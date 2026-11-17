@@ -242,19 +242,24 @@ function M.rows(entries, ui)
       for _, group in ipairs(M.GROUPS) do
         listed[group.key], counts[group.key] = {}, 0
       end
+      local function place(f, key)
+        local count = counts[key] + 1
+        counts[key] = count
+        if count <= limit then
+          listed[key][count] = f
+        end
+      end
       for i = 1, #files do
         local f = files[i]
         if f.xy then
           pending = true
         end
         local first, second = groups_of(f)
-        while first do
-          local count = counts[first] + 1
-          counts[first] = count
-          if count <= limit then
-            listed[first][count] = f
-          end
-          first, second = second, nil
+        if first then
+          place(f, first)
+        end
+        if second then
+          place(f, second)
         end
       end
       -- With several repositories, only one that has something to commit

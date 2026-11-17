@@ -327,7 +327,7 @@ end
 -- Build one Repo Entry from a finished `git status` subprocess result. Runs
 -- on the main loop (callers vim.schedule this) — never in vim.system's
 -- fast-event callback context.
-local function build_entry(repo, out, committed, comparison_base, comparison_fingerprint, history_oid)
+local function build_entry(repo, out, committed, comparison_base, comparison_fingerprint)
   local name = repo:match("[^/]+$") or repo
   if out.code == 0 then
     local p = M.parse_status(vim.split(out.stdout or "", "\n", { trimempty = true }))
@@ -341,10 +341,8 @@ local function build_entry(repo, out, committed, comparison_base, comparison_fin
       files = files,
       clean = #files == 0,
       comparison_base = comparison_base,
-      _head_oid = (out.stdout or ""):match("# branch%.oid (%S+)"),
       _committed = committed,
-      -- The commit the committed files were collected for.
-      _history_oid = history_oid,
+      -- What `_committed` was collected for: HEAD's commit and the comparison refs'.
       _comparison_fingerprint = comparison_fingerprint,
     }
   end
@@ -445,7 +443,7 @@ local function scan_repo(repo, opts, cb, status_only, partial, prior, reuse_hist
       cb(build_entry(repo, status))
     elseif history then
       finished = true
-      cb(build_entry(repo, status, history.committed, history.base, history.fingerprint, history.oid))
+      cb(build_entry(repo, status, history.committed, history.base, history.fingerprint))
     end
   end
   -- Every untracked file is listed by name, as VS Code lists them, where git
@@ -461,16 +459,16 @@ local function scan_repo(repo, opts, cb, status_only, partial, prior, reuse_hist
     return
   end
   comparison_fingerprint(repo, opts, function(fingerprint)
-    local oid = fingerprint and ("\n" .. fingerprint):match("\n(%x+) HEAD\n")
     -- The same commit compared against the same refs has the same history.
-    if reuse_history and prior and prior._committed and oid and prior._history_oid == oid
-      and fingerprint and fingerprint == prior._comparison_fingerprint then
-      history = { committed = prior._committed, base = prior.comparison_base, fingerprint = fingerprint, oid = oid }
+    -- The fingerprint names both, so one comparison decides.
+    if reuse_history and prior and prior._committed and fingerprint
+      and fingerprint == prior._comparison_fingerprint then
+      history = { committed = prior._committed, base = prior.comparison_base, fingerprint = fingerprint }
       settle()
       return
     end
     collect_committed(repo, opts, function(committed, comparison_base)
-      history = { committed = committed, base = comparison_base, fingerprint = fingerprint, oid = oid }
+      history = { committed = committed, base = comparison_base, fingerprint = fingerprint }
       settle()
     end, fingerprint)
   end)
