@@ -73,6 +73,27 @@ function M.badge(group, entry)
   return letter(code, LETTER_HL[code] or "ScmModified")
 end
 
+-- The Change Groups one File Entry is listed in: up to two keys, in the order
+-- of M.GROUPS. It says where M.badge would give a badge, without building
+-- one, so tens of thousands of files can be sorted into groups cheaply.
+local function groups_of(entry)
+  local xy = entry.xy
+  if not xy then
+    return "committed"
+  end
+  if UNMERGED_XY[xy] then
+    return "merge"
+  end
+  if xy == "??" then
+    return "changes"
+  end
+  local staged, changed = xy:byte(1) ~= 46, xy:byte(2) ~= 46 -- 46 is "."
+  if staged and changed then
+    return "staged", "changes"
+  end
+  return staged and "staged" or changed and "changes" or nil
+end
+
 -- The most files one Change Group lists. A branch far from its baseline can
 -- differ in tens of thousands of files, more than a Renderer can be sent.
 M.GROUP_LIMIT = 1000
@@ -214,11 +235,26 @@ function M.rows(entries, ui)
     if open and e.err then
       add({ id = "note:" .. e.path, kind = "note", depth = base, entry = e, label = e.err, error = true })
     elseif open then
+      -- One pass sorts every file into its groups. Only the files a group
+      -- will list are kept; the rest are counted.
       local pending = false
-      for _, f in ipairs(files) do
+      local listed, counts = {}, {}
+      for _, group in ipairs(M.GROUPS) do
+        listed[group.key], counts[group.key] = {}, 0
+      end
+      for i = 1, #files do
+        local f = files[i]
         if f.xy then
           pending = true
-          break
+        end
+        local first, second = groups_of(f)
+        while first do
+          local count = counts[first] + 1
+          counts[first] = count
+          if count <= limit then
+            listed[first][count] = f
+          end
+          first, second = second, nil
         end
       end
       -- With several repositories, only one that has something to commit
@@ -228,26 +264,25 @@ function M.rows(entries, ui)
         add({ id = M.button_id(e.path), kind = "button", depth = base, entry = e, label = "Commit" })
       end
       for _, group in ipairs(M.GROUPS) do
-        local members = {}
-        for _, f in ipairs(files) do
-          local badge, gone = M.badge(group.key, f)
-          if badge then
-            members[#members + 1] = { path = f.path, fentry = f, badge = badge, gone = gone }
-          end
-        end
-        if #members > 0 then
+        local total = counts[group.key]
+        if total > 0 then
           local id = "group:" .. e.path .. ":" .. group.key
           local group_open = not collapsed[id]
           add({
             id = id, kind = "group", depth = base, entry = e, group = group.key,
-            label = group.label, count = tostring(#members), expanded = group_open,
+            label = group.label, count = tostring(total), expanded = group_open,
             actions = CONTAINER_ACTIONS[group.key],
           })
           -- A Change Group lists at most `limit` files. The count beside it
           -- stays the true total, and a note says how many are left out.
-          local hidden = math.max(0, #members - limit)
-          for i = #members, limit + 1, -1 do
-            members[i] = nil
+          local hidden = math.max(0, total - limit)
+          local members = {}
+          -- A closed group lists nothing, so its badges are not worked out.
+          if group_open then
+            for i, f in ipairs(listed[group.key]) do
+              local badge, gone = M.badge(group.key, f)
+              members[i] = { path = f.path, fentry = f, badge = badge, gone = gone }
+            end
           end
           if group_open and mode == "tree" then
             tree_rows(add, e, group.key, members, base + 1, collapsed)

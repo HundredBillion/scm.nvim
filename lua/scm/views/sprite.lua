@@ -9,6 +9,11 @@ local M = {}
 M.FEATURE = 'virtual-list-rows-v2'
 
 local ROW_HEIGHT, CONTROL_ROW_HEIGHT, INDENT = 22, 36, 8
+-- A Panel opening on a long list first sends this many rows, more than a
+-- screen holds, and the whole list after them. The cost of a frame grows
+-- with its size: two thousand rows are a megabyte, and the first screen
+-- would otherwise wait for all of it.
+M.FIRST_ROWS = 100
 -- VS Code insets the commit box and button 11 pixels past their level's indent.
 local CONTROL_INSET = 11
 -- The host accepts at most this many guides on a row, and strings this long.
@@ -154,6 +159,14 @@ function M.rows(opts, rows, ui, assets)
   return out
 end
 
+-- Do, ahead of the first open, the work an open would otherwise wait for:
+-- finding the icon theme and reading the icons these rows use.
+function M.prewarm(opts, rows, ui)
+  local assets = {}
+  description(opts, ui, assets)
+  M.rows(opts, rows, ui, assets)
+end
+
 -- The host's key names, in Vim notation.
 local NAMED = {
   enter='<CR>', escape='<Esc>', up='<Up>', down='<Down>', left='<Left>', right='<Right>',
@@ -190,6 +203,17 @@ function M.open(opts, action, ready, failed)
     if self.dock then self.dock:close() end
   end
   function view:selection() return self.selected end
+  -- Run fn once the host has the frame now on its way, or at once when none is.
+  local waiters = {}
+  local function frame_landed()
+    local ready_now = waiters
+    waiters = {}
+    for _, fn in ipairs(ready_now) do fn() end
+  end
+  function view:after_frame(fn)
+    if self.closed then return end
+    if self.busy or self.pending then waiters[#waiters + 1] = fn else fn() end
+  end
   function view:focus()
     if self.closed or not self.dock then return false end
     self.focused=true
@@ -237,19 +261,37 @@ function M.open(opts, action, ready, failed)
     if view.closed or view.busy or not view.dock or not view.pending then return end
     local next_rows = view.pending
     view.pending=nil
-    view.busy=true
-    view.revision=view.revision+1
-    local revision=view.revision
+    local whole
+    if not view.applied and #next_rows.rows > M.FIRST_ROWS and next_rows.index <= M.FIRST_ROWS then
+      whole = next_rows
+      next_rows = {rows=vim.list_slice(whole.rows, 1, M.FIRST_ROWS), index=whole.index, ui=whole.ui}
+    end
     local ui = next_rows.ui or {}
     local assets = {}
     -- Building the description registers the header icons it names.
     description(opts, ui, assets)
     local rows = M.rows(opts, next_rows.rows, ui, assets)
+    local selected = rows[next_rows.index] and rows[next_rows.index].id
+    -- A refresh that found nothing new draws the frame the host already has.
+    -- Sending it again would cost a megabyte for a long list, many times over.
+    if view.applied and view.sent and view.sent.selected == selected and view.described == description_key(ui)
+      and vim.deep_equal(view.sent.rows, rows) then
+      view.rows_value, view.ui, view.selected = next_rows.rows, ui, next_rows.index
+      frame_landed()
+      return
+    end
+    view.busy=true
+    view.revision=view.revision+1
+    local revision=view.revision
     prepare(assets, ui, function()
-      view.dock:rows(revision, rows, rows[next_rows.index] and rows[next_rows.index].id, function(err)
+      view.dock:rows(revision, rows, selected, function(err)
         if view.closed or revision~=view.revision then return end
         view.busy=false
         if err then fail(err); return end
+        view.sent={rows=rows, selected=selected}
+        -- The rest of a list that opened on its first screen, unless newer rows wait.
+        if whole and not view.pending then view.pending = whole end
+        frame_landed()
         view.rows_value=next_rows.rows
         view.ui=ui
         view.selected=next_rows.index
@@ -288,7 +330,11 @@ function M.open(opts, action, ready, failed)
     view.selected = index
     local row = view.rows_value[index]
     if not (row and view.dock.state) then view:render(view.rows_value, index, view.ui); return end
+    -- The host's selection is now this row, whatever frame it last drew.
+    if view.sent then view.sent.selected = row.id end
     view.dock:state(view.applied, {selected=row.id, reveal=row.id}, function(err)
+      -- The host refused: what it shows is unknown, so the next frame is sent whole.
+      if err then view.sent = nil end
       -- Rows that changed meanwhile carry their own selection.
       if err and not view.closed and not view.busy and not view.pending then
         view:render(view.rows_value, view.selected, view.ui)
@@ -392,7 +438,12 @@ function M.open(opts, action, ready, failed)
     end
     view.dock=dock
     view.described=description_key({})
-    register(assets, function() ready(view) end)
+    -- The header's icons are registered with the first frame's, in one
+    -- message sent at once. The host is busy for a moment after it opens a
+    -- dock, and a second message would wait that out before any row showed.
+    local rendered = view.pending ~= nil
+    ready(view)
+    if not rendered and not view.pending and not view.busy and not view.closed then register(assets, function() end) end
   end)
   return view
 end

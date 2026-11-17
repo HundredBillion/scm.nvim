@@ -52,13 +52,12 @@ git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "
 vim.fn.writefile({ "working" }, staged .. "/working.txt")
 vim.cmd.cd(staged)
 scm.setup({ renderer = "terminal" })
+-- The warm-up collects committed history too: the first open shows it from
+-- the cache instead of waiting on git.
 assert(vim.wait(5000, function()
   local entries = core.cached(staged)
-  return entries and entries[1] and #entries[1].files > 0
-end, 10), "startup publishes working changes")
-local warm_files = core.cached(staged)[1].files
-eq(#warm_files, 1, "warm-up collects status before committed history")
-eq(warm_files[1].path, "working.txt", "working change is immediately visible")
+  return entries and entries[1] and #entries[1].files == 2
+end, 10), "startup collects working changes and committed history")
 local complete
 core.refresh(staged, core.defaults, function(entries) complete = entries end, { cached = true })
 assert(vim.wait(5000, function() return complete ~= nil end, 10), "open completes history")

@@ -85,10 +85,15 @@ end
 -- Themes by the option that asked for them, `false` when there is none, so
 -- the search and the JSON decode happen once and not once per row.
 local themes = {}
--- Forget every theme, for when the Panel opens: a plugin that bundles one may
--- have been installed or loaded since.
+-- Look again for a theme that was not found, for when the Panel opens: a
+-- plugin that bundles one may have been installed or loaded since. A theme
+-- that was found is kept, with the icons already read from it.
 function M.reset()
-  themes = {}
+  for key, theme in pairs(themes) do
+    if not theme then
+      themes[key] = nil
+    end
+  end
 end
 
 -- option: nil finds a theme, a string names a theme directory, false uses none.
