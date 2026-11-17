@@ -98,6 +98,7 @@ when Neovim regains focus, and after every action it runs.
 | --- | --- | --- |
 | `renderer` | `"auto"` | `auto`, `terminal`, or `sprite`. |
 | `view` | `"list"` | `list` or `tree`. |
+| `group_limit` | `1000` | Most files one group lists. The group's count stays the true total and a last row says how many are left out. |
 | `width` | `36` | Terminal panel width in columns. |
 | `native_width` | `300` | Native dock width in pixels. |
 | `native.colors` | VS Code dark | Overrides for native colour roles such as `background`, `foreground`, `button_background` and `count_background`. |

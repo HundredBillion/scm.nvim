@@ -136,4 +136,23 @@ dock.features = {}
 local refused
 view_module.open({}, function() end, function() error('opened') end, function(err) refused = err end)
 assert(refused and refused.message:find('update Sprite', 1, true), 'an old host is refused with a reason')
+-- A branch far from its baseline changes more files than a host can be sent.
+local many = {}
+for i = 1, 2500 do many[i] = {path=('src/f%04d.lua'):format(i), commit_status='M'} end
+for _, mode in ipairs({'list', 'tree'}) do
+  local big = model.rows({{path='/r/big', name='big', branch='b', files=many}}, {mode=mode})
+  local files, note, group = 0, nil, nil
+  for _, row in ipairs(big) do
+    if row.kind == 'file' then files = files + 1 end
+    if row.kind == 'note' then note = row end
+    if row.kind == 'group' then group = row end
+  end
+  assert(files == model.GROUP_LIMIT, mode .. ' lists at most the limit, got ' .. files)
+  assert(group.count == '2500', 'the count stays the true total')
+  assert(note and note.label == '1500 more not shown' and not note.error, 'a note says what is left out')
+end
+local few = model.rows({{path='/r/big', name='big', branch='b', files=many}}, {limit=3})
+local shown = 0
+for _, row in ipairs(few) do if row.kind == 'file' then shown = shown + 1 end end
+assert(shown == 3, 'the limit is an option')
 print('OK native view')

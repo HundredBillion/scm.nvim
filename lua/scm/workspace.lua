@@ -349,18 +349,23 @@ function M.toggle()
   -- Start from what Core last saw for this root so the rows show before git answers.
   local state = {root=root, tab=vim.api.nvim_get_current_tabpage(), editor=vim.api.nvim_get_current_win(),
     entries=core.cached(root) or {}, selected=1,
-    ui={mode=options.view == 'tree' and 'tree' or 'list', collapsed={}, messages={}, folded=false}}
+    ui={mode=options.view == 'tree' and 'tree' or 'list', collapsed={}, messages={}, folded=false,
+      limit=options.group_limit}}
   active = state
   local function on_action(name, index, arg) action(state, name, index, arg) end
+  local docked = false
   local function ready(view)
     if active ~= state then view:close(); return end
     state.view=view
+    docked = true
     render(state)
     refresh(state, {cached=true, reuse_history=true})
   end
   local function terminal(err)
     if active ~= state then return end
-    if err and options.renderer == 'sprite' then
+    -- A dock that opened and then failed is worth a word; a terminal that has
+    -- no docks at all is not.
+    if err and (options.renderer == 'sprite' or docked) then
       vim.notify('SCM Sprite unavailable: ' .. tostring(err.message or err.kind or err), vim.log.levels.WARN)
     end
     ready(require('scm.views.terminal').open(options, on_action,

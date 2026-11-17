@@ -72,6 +72,10 @@ function M.badge(group, entry)
   return letter(code, LETTER_HL[code] or "ScmModified")
 end
 
+-- The most files one Change Group lists. A branch far from its baseline can
+-- differ in tens of thousands of files, more than a Renderer can be sent.
+M.GROUP_LIMIT = 1000
+
 -- Every path git must be given to stage or unstage a Repo Entry's whole
 -- Change Group. A staged rename covers both its new and its original path.
 function M.group_paths(entry, group)
@@ -181,6 +185,7 @@ end
 --   collapsed  row id -> true for a collapsed repository, Change Group or directory
 --   messages   repository path -> the commit message being typed
 --   folded     true hides every row, as collapsing the "Changes" section does
+--   limit      the most files one Change Group lists (default GROUP_LIMIT)
 -- Every row has an id that survives a Refresh, a kind, and a depth. One
 -- repository is listed without a repository row, as in VS Code.
 function M.rows(entries, ui)
@@ -190,6 +195,7 @@ function M.rows(entries, ui)
     return rows
   end
   local collapsed, mode, messages = ui.collapsed or {}, ui.mode or "list", ui.messages or {}
+  local limit = ui.limit or M.GROUP_LIMIT
   local multi = #entries > 1
   local function add(row)
     rows[#rows + 1] = row
@@ -230,12 +236,24 @@ function M.rows(entries, ui)
             label = group.label, count = tostring(#members), expanded = group_open,
             actions = CONTAINER_ACTIONS[group.key],
           })
+          -- A Change Group lists at most `limit` files. The count beside it
+          -- stays the true total, and a note says how many are left out.
+          local hidden = math.max(0, #members - limit)
+          for i = #members, limit + 1, -1 do
+            members[i] = nil
+          end
           if group_open and mode == "tree" then
             tree_rows(add, e, group.key, members, base + 1, collapsed)
           elseif group_open then
             for _, f in ipairs(members) do
               file_row(add, e, group.key, f, base + 1, false)
             end
+          end
+          if group_open and hidden > 0 then
+            add({
+              id = "more:" .. e.path .. ":" .. group.key, kind = "note", depth = base + 1, entry = e,
+              label = ("%d more not shown"):format(hidden),
+            })
           end
         end
       end
