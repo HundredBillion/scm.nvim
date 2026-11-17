@@ -58,6 +58,8 @@ jobs:
           nvim -l tests/editor_window_test.lua
           nvim -l tests/toggle_test.lua
           nvim -l tests/diff_test.lua
+          nvim -l tests/frame_reuse_test.lua
+          nvim -l tests/first_frame_test.lua
 
       - name: Check proposed diff for whitespace errors
         if: github.event_name == 'pull_request'

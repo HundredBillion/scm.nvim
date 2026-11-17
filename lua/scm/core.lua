@@ -174,21 +174,47 @@ local function parse_name_status(stdout)
       files[#files + 1] = { path = path, orig = orig, commit_status = status }
     end
   end
-  return files
-end
-
-local function merge_files(committed, pending)
-  local by_path = {}
-  for _, file in ipairs(committed) do
-    by_path[file.path] = file
-  end
-  for _, file in ipairs(pending) do
-    by_path[file.path] = file
-  end
-  local files = vim.tbl_values(by_path)
+  -- Sorted once here, so every later merge with the working changes is a
+  -- single pass and not a sort of the whole list.
   table.sort(files, function(a, b)
     return a.path < b.path
   end)
+  return files
+end
+
+-- The committed files and the working changes as one list sorted by path; a
+-- file in both is listed as its working change. `committed` is sorted and is
+-- never changed: a branch can be tens of thousands of files from its base,
+-- and this runs on every refresh.
+local function merge_files(committed, pending)
+  if #pending == 0 then
+    return committed
+  end
+  local by_path = {}
+  for _, file in ipairs(pending) do
+    by_path[file.path] = file
+  end
+  local working = vim.tbl_values(by_path)
+  table.sort(working, function(a, b)
+    return a.path < b.path
+  end)
+  if #committed == 0 then
+    return working
+  end
+  local files, next_working = {}, 1
+  for i = 1, #committed do
+    local file = committed[i]
+    while working[next_working] and working[next_working].path < file.path do
+      files[#files + 1] = working[next_working]
+      next_working = next_working + 1
+    end
+    if not by_path[file.path] then
+      files[#files + 1] = file
+    end
+  end
+  for i = next_working, #working do
+    files[#files + 1] = working[i]
+  end
   return files
 end
 
@@ -315,8 +341,8 @@ local function build_entry(repo, out, committed, comparison_base, comparison_fin
       files = files,
       clean = #files == 0,
       comparison_base = comparison_base,
-      _head_oid = (out.stdout or ""):match("# branch%.oid (%S+)"),
       _committed = committed,
+      -- What `_committed` was collected for: HEAD's commit and the comparison refs'.
       _comparison_fingerprint = comparison_fingerprint,
     }
   end
@@ -344,11 +370,15 @@ local function run_git(repo, opts, args, cb)
 end
 
 local comparison_refs = { "refs/remotes/origin/HEAD", "refs/heads/main", "refs/heads/master" }
+-- What a repository's committed files depend on, from one git process: the
+-- commit HEAD is at and the commit of each comparison ref that exists, as
+-- "<commit> <ref>" lines. nil when git fails. `show-ref` exits 1 when it has
+-- nothing to list, as in a repository with no commit yet.
 local function comparison_fingerprint(repo, opts, cb)
-  local args = { "for-each-ref", "--format=%(refname) %(objectname)" }
+  local args = { "show-ref", "--head" }
   vim.list_extend(args, comparison_refs)
   run_git(repo, opts, args, function(out)
-    cb(out.code == 0 and out.stdout or nil)
+    cb((out.code == 0 or out.code == 1) and (out.stdout or "") or nil)
   end)
 end
 
@@ -377,7 +407,7 @@ local function collect_committed(repo, opts, cb, fingerprint)
   if fingerprint then
     available = {}
     for line in fingerprint:gmatch("[^\n]+") do
-      local ref = line:match("^(%S+) ")
+      local ref = line:match("^%x+ (%S+)$")
       if ref then available[ref] = true end
     end
   end
@@ -398,30 +428,49 @@ local function collect_committed(repo, opts, cb, fingerprint)
   end, available)
 end
 
+-- Scan one repository. Its status and its committed history are read at the
+-- same time: in a large repository each takes about as long as the other, and
+-- one after the other they made the Panel wait twice. A scan whose history
+-- is reused runs two git processes.
 local function scan_repo(repo, opts, cb, status_only, partial, prior, reuse_history)
+  local status, history, finished
+  local function settle()
+    if finished or not status then
+      return
+    end
+    if status.code ~= 0 or status_only then
+      finished = true
+      cb(build_entry(repo, status))
+    elseif history then
+      finished = true
+      cb(build_entry(repo, status, history.committed, history.base, history.fingerprint))
+    end
+  end
   -- Every untracked file is listed by name, as VS Code lists them, where git
   -- would otherwise show a new directory as one entry.
   run_git(repo, opts, { "status", "--porcelain=v2", "--branch", "--untracked-files=all" }, function(out)
-    if out.code ~= 0 then
-      cb(build_entry(repo, out))
+    status = out
+    if out.code == 0 and not status_only and not history and partial then
+      partial(build_entry(repo, out))
+    end
+    settle()
+  end)
+  if status_only then
+    return
+  end
+  comparison_fingerprint(repo, opts, function(fingerprint)
+    -- The same commit compared against the same refs has the same history.
+    -- The fingerprint names both, so one comparison decides.
+    if reuse_history and prior and prior._committed and fingerprint
+      and fingerprint == prior._comparison_fingerprint then
+      history = { committed = prior._committed, base = prior.comparison_base, fingerprint = fingerprint }
+      settle()
       return
     end
-    if status_only then
-      cb(build_entry(repo, out))
-      return
-    end
-    if partial then partial(build_entry(repo, out)) end
-    local oid = (out.stdout or ""):match("# branch%.oid (%S+)")
-    comparison_fingerprint(repo, opts, function(fingerprint)
-      if reuse_history and prior and prior._committed and prior._head_oid == oid
-        and fingerprint and fingerprint == prior._comparison_fingerprint then
-        cb(build_entry(repo, out, prior._committed, prior.comparison_base, fingerprint))
-        return
-      end
-      collect_committed(repo, opts, function(committed, comparison_base)
-        cb(build_entry(repo, out, committed, comparison_base, fingerprint))
-      end, fingerprint)
-    end)
+    collect_committed(repo, opts, function(committed, comparison_base)
+      history = { committed = committed, base = comparison_base, fingerprint = fingerprint }
+      settle()
+    end, fingerprint)
   end)
 end
 
@@ -430,8 +479,17 @@ end
 -- A queued scan starts after every request that joined it, so its result is current for
 -- all of them. A running scan may predate a newer request and is never joined.
 local scan_queue, scans_running, queued_scans = {}, 0, {}
-local function drain_scans()
-  while scans_running < 4 and #scan_queue > 0 do
+-- How many repositories are scanned at once: half the processors, since a
+-- scan runs two git commands side by side, but at least 4 and at most 8.
+M.SCAN_LIMIT = math.max(4, math.min(8, math.floor((vim.uv.available_parallelism and vim.uv.available_parallelism() or 8) / 2)))
+-- Starting a git process holds Neovim for a millisecond or more, and a scan
+-- starts two. One scan is started per turn of the event loop, so a refresh
+-- of many repositories never freezes the editor, or the Panel's first frame,
+-- for the tens of milliseconds a burst of them would.
+local drain_scheduled = false
+local drain_scans
+local function start_scan()
+  if scans_running < M.SCAN_LIMIT and #scan_queue > 0 then
     local job = table.remove(scan_queue, 1)
     queued_scans[job.repo] = nil
     scans_running = scans_running + 1
@@ -445,6 +503,17 @@ local function drain_scans()
       for _, cb in ipairs(job.partial_cbs) do cb(entry) end
     end, job.prior, job.reuse_history)
   end
+end
+drain_scans = function()
+  if drain_scheduled or scans_running >= M.SCAN_LIMIT or #scan_queue == 0 then
+    return
+  end
+  drain_scheduled = true
+  vim.schedule(function()
+    drain_scheduled = false
+    start_scan()
+    drain_scans()
+  end)
 end
 local function enqueue_scan(repo, opts, cb, status_only, partial, prior, reuse_history)
   local job = queued_scans[repo]
@@ -528,15 +597,22 @@ function M.cached(root)
   return entries
 end
 
--- Collect status before the first open; committed history can finish after rows appear.
+-- Collect everything the first open shows, committed history included, so the Panel
+-- opens with its files and does not wait on git. Each repository's status is kept as
+-- soon as it is known, for an open that comes before the warm-up ends.
 -- An open during warm-up joins queued scans instead of starting duplicate Git work.
 -- Returns true when it started one. A failure is dropped; the next open reports it.
-function M.warm(root, opts)
+-- done(), when given, runs once the warm-up it started has finished.
+function M.warm(root, opts, done)
   root = vim.fs.normalize(vim.uv.fs_realpath(vim.fn.expand(root)) or vim.fn.expand(root))
   if scopes[root] then
     return false
   end
-  return M.refresh(root, opts, function() end, {status_only=true})
+  return M.refresh(root, opts, function(entries)
+    if entries and done then
+      done()
+    end
+  end, {})
 end
 
 -- Omitting request preserves the public full-discovery refresh behavior.
@@ -605,9 +681,16 @@ function M.refresh(root, opts, cb, request, progress, preliminary)
         elseif progress then
           publish(progress)
         end
-      end, request and request.status_only, preliminary and not snapshot[repo] and function(entry)
+      end, request and request.status_only, not snapshot[repo] and function(entry)
         snapshot[repo] = entry
-        publish(preliminary)
+        -- A repository seen for the first time is cached by its status alone
+        -- until its history lands, so an open meanwhile has something to show.
+        if cached.entries[repo] == nil then
+          cached.entries[repo] = entry
+        end
+        if preliminary then
+          publish(preliminary)
+        end
       end, snapshot[repo], request and request.reuse_history)
     end
   end

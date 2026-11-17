@@ -68,11 +68,12 @@ end
 -- Warm-up for every renderer: once startup is over, scan the root SCM would open on.
 -- Deferred so a Panel opened in the same tick (a lazy load on the key) starts first and the
 -- warm-up then skips its root.
-function M.warm(options)
+-- warmed(root), when given, runs once that scan has finished.
+function M.warm(options, warmed)
   if options.warm == false then return end
   local function run()
     local root = require("scm.scope").candidate()
-    if root then require("scm.core").warm(root, options) end
+    if root then require("scm.core").warm(root, options, warmed and function() warmed(root) end) end
   end
   if vim.v.vim_did_enter == 1 then
     vim.defer_fn(run, 0)

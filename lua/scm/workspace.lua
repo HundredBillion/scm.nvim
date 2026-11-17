@@ -386,7 +386,12 @@ function M.toggle()
     state.view=view
     docked = true
     render(state)
-    refresh(state, {cached=true, reuse_history=true})
+    -- What Core already holds is drawn first. Asking git again starts a
+    -- dozen processes, and the first frame must not wait behind them.
+    local function rescan()
+      if active == state and state.view == view then refresh(state, {cached=true, reuse_history=true}) end
+    end
+    if view.after_frame then view:after_frame(rescan) else rescan() end
   end
   local function terminal(err)
     if active ~= state then return end
@@ -446,6 +451,13 @@ function M.setup(opts)
   end})
   vim.api.nvim_create_autocmd('TabLeave', {group=group, callback=M.close})
   vim.api.nvim_create_user_command('ScmToggle', M.toggle, {force=true})
-  policy.warm(options)
+  local warmed_for = options
+  policy.warm(options, function(root)
+    -- The native Panel also finds its icons ahead of the first open.
+    if options ~= warmed_for or options.renderer == 'terminal' or not pcall(require, 'sprite') then return end
+    local mode = options.view == 'tree' and 'tree' or 'list'
+    local rows = model.rows(core.cached(root) or {}, {mode=mode, limit=options.group_limit})
+    pcall(require('scm.views.sprite').prewarm, options, rows, {mode=mode})
+  end)
 end
 return M

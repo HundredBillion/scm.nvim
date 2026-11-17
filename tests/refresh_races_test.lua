@@ -24,6 +24,8 @@ end
 local opts, latest = {repo_debounce_ms=0}, nil
 local function refresh(request)
   core.refresh('/scope', opts, function(entries, err) latest={entries=entries,err=err} end, request)
+  -- Scans start one per turn of the event loop: let this refresh's begin.
+  vim.wait(20, function() return false end)
 end
 local function branches()
   local result={}
@@ -43,6 +45,7 @@ refresh({cached=true,paths={['/scope/a/file']=true}})
 finish('/scope/a','new-a')
 assert(branches()['/scope/b']=='new-b','older full result cannot poison cached sibling')
 core.refresh_repo('/scope/b',opts,function() end)
+vim.wait(20, function() return false end)
 finish('/scope/b','scoped-b')
 refresh({cached=true,paths={['/scope/a/file']=true}})
 finish('/scope/a','new-a')
@@ -66,6 +69,8 @@ refresh({cached=true,paths={['/scope/a/file']=true}})
 finish('/scope/a','?',1)
 assert(latest.entries[1].err=='failed Git','Git error remains a Repo Entry')
 assert(branches()['/scope/new']=='new','discovery failure preserves cached membership')
+-- Scans start one per turn of the event loop: let those just asked for begin.
+local function tick() vim.wait(20, function() return false end) end
 for _, discovery_pending in ipairs({false, true}) do
   local root = discovery_pending and '/pending-scope' or '/initial-scope'
   local a, b = root .. '/a', root .. '/b'
@@ -75,11 +80,13 @@ for _, discovery_pending in ipairs({false, true}) do
     return true
   end
   core.refresh(root, opts, function() end)
+  tick()
   local initial_b
   if not discovery_pending then initial_b=table.remove(pending,2) end
   core.refresh_repo(b, opts, function(entry) assert(entry.branch=='new-b') end)
+  tick()
   finish(b,'new-b')
-  if discovered then discovered({a,b}) end
+  if discovered then discovered({a,b}); tick() end
   finish(a,'initial-a')
   if initial_b then
     initial_b.cb({code=0,stdout='# branch.head old-b\n',stderr=''})
@@ -87,6 +94,7 @@ for _, discovery_pending in ipairs({false, true}) do
   else finish(b,'old-b') end
   core.refresh(root, opts, function(entries, err) latest={entries=entries,err=err} end,
     {cached=true,paths={[a .. '/file']=true}})
+  tick()
   finish(a,'new-a')
   assert(branches()[b]=='new-b', 'newer scoped result survives initial scope; discovery pending=' .. tostring(discovery_pending))
 end
