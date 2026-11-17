@@ -162,6 +162,32 @@ assert(vim.deep_equal(text, {'brand new'}) and line_marks(buf)[1] == 'ScmDiffAdd
 _, text = show({path='blob.bin', group='changes'})
 assert(#text == 1 and text[1]:find('binary', 1, true), 'a binary file is not compared')
 
+-- Only a regular file of a sane size is read from disk.
+vim.uv.fs_symlink('/etc/hosts', root .. '/link')
+buf, text = show({path='link', group='changes', untracked=true})
+assert(vim.deep_equal(text, {'/etc/hosts'}), 'a link shows where it points, as git keeps it, and is not followed')
+assert(vim.system({'mkfifo', root .. '/pipe'}):wait().code == 0)
+_, text = show({path='pipe', group='changes', untracked=true})
+assert(vim.deep_equal(text, {''}), 'a pipe is not read: reading one would never finish')
+handle = io.open(root .. '/huge.txt', 'wb')
+handle:write(('0123456789abcde\n'):rep(300000))
+handle:close()
+_, text = show({path='huge.txt', group='changes', untracked=true})
+assert(#text == 1 and text[1]:find('too large', 1, true), 'a file past the size limit is not read')
+git('add', 'huge.txt')
+_, text = show({path='huge.txt', group='staged'})
+assert(#text == 1 and text[1]:find('too large', 1, true), 'nor is one that git holds')
+git('rm', '-q', '--cached', 'huge.txt')
+vim.fn.delete(root .. '/huge.txt')
+vim.fn.delete(root .. '/pipe')
+vim.fn.delete(root .. '/link')
+-- A file whose name looks like a conflict stage is still the staged file.
+write('1:edit.lua', {'odd name'})
+git('add', '1:edit.lua')
+_, text = show({path='1:edit.lua', group='staged'})
+assert(vim.deep_equal(text, {'odd name'}), 'a path beginning "1:" is read as itself, got ' .. vim.inspect(text))
+git('rm', '-q', '-f', '1:edit.lua')
+
 -- Committed: the branch's base against its last commit, following a rename.
 buf, text = show({path='branch.lua', group='committed', base=base})
 assert(vim.deep_equal(text, {'on the branch'}) and line_marks(buf)[1] == 'ScmDiffAdd', 'a file added on the branch is all added')
