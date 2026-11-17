@@ -172,10 +172,16 @@ local function repo_row(add, e, collapsed)
   end
   local has_children = e.err ~= nil or #files > 0
   local open = has_children and not collapsed[id]
+  -- `expanded` is nil only for a row that cannot expand. A collapsed row says
+  -- false, which `has_children and open or nil` would turn into nil.
+  local expanded = nil
+  if has_children then
+    expanded = open
+  end
   add({
     id = id, kind = "repo", depth = 0, entry = e, label = e.name, description = branch,
     count = #files > 0 and tostring(#files) or nil,
-    expanded = has_children and open or nil, error = e.err,
+    expanded = expanded, error = e.err,
   })
   return open
 end

@@ -55,6 +55,7 @@ jobs:
           nvim -l tests/sprite_busy_input_test.lua
           nvim -l tests/native_view_test.lua
           nvim -l tests/actions_test.lua
+          nvim -l tests/toggle_test.lua
 
       - name: Check proposed diff for whitespace errors
         if: github.event_name == 'pull_request'
