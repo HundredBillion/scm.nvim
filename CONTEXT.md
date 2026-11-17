@@ -1,8 +1,9 @@
 # SCM Panel
 
 The multi-repo source control panel: a persistent Neovim sidebar that shows
-every repository's changes under the Working Directory at a glance. SCM runs git
-itself and never hands work to an external git client.
+every repository's changes under the Working Directory at a glance, laid out
+like VS Code's Source Control view, and stages, unstages, discards and commits
+them. SCM runs git itself and never hands work to an external git client.
 
 ## Language
 
@@ -13,10 +14,17 @@ any UI plugin.
 _Avoid_: backend, engine, brain
 
 **Panel**:
-The persistent left-rail view listing Repo Entries, opened and closed with one
-toggle. It contains no git knowledge.
+The persistent left-rail view listing Repository Sections, opened and closed
+with one toggle. It runs git only through Core, which reads, and Actions, which
+write.
 _Avoid_: sidebar (ambiguous with the file explorer), picker, Workspace (the
 module that runs it)
+
+**Actions**:
+The UI-free Lua module that changes a repository on the user's behalf: stage,
+unstage, discard, commit. Like Core it imports nothing from any UI plugin.
+Every path it gives git is the exact file it names, never a pattern.
+_Avoid_: commands, operations
 
 **Sidebar Activity**:
 One mutually exclusive left-rail mode: either the Panel or a file explorer.
@@ -29,15 +37,37 @@ activity is fully closed before the incoming activity opens.
 _Avoid_: swap, delayed open
 
 **Repository Section**:
-One repository header and its zero or more File Entry rows in the Panel. A
-Repository Section may be expanded or collapsed; this is presentation state
-and does not change its Repo Entry.
+One repository's rows in the Panel: its commit box and Commit button, then its
+Change Groups. When the Working Directory holds several repositories, each
+section starts with a repository row that expands or collapses it, and only a
+repository with a Pending File Entry has a commit box; a single repository has
+no repository row. Expansion is presentation state and does not change the
+Repo Entry.
 _Avoid_: directory (the section groups source-control state, not filesystem
 children), repo tree
 
+**Change Group**:
+One named set of File Entries within a Repository Section, with a count: Merge
+Changes, Staged Changes, Changes, or Committed. A group is listed only when it
+has entries, and may be collapsed.
+_Avoid_: section (a Repository Section), category, status
+
+**View Mode**:
+How a Change Group lists its File Entries: as a flat list, each file followed
+by its directory, or as a tree in which a directory whose only child is another
+directory shares one row with it.
+_Avoid_: layout, display mode
+
+**Row**:
+One line of the Panel as plain Lua data: a repository, a commit box, a button,
+a Change Group, a directory, or a file, with the actions it can take. Rows are
+derived from Repo Entries by the model and are the same for every Renderer.
+_Avoid_: item, node
+
 **Renderer**:
 One way of drawing the Panel: a Neovim terminal buffer, or a Sprite native
-panel. Every Renderer receives the same Repo Entry list from Core.
+panel. Every Renderer receives the same Rows; it decides how each kind is
+drawn and holds no git knowledge.
 _Avoid_: face (informal), frontend
 
 **Working Directory**:
@@ -75,13 +105,20 @@ _Avoid_: upstream, parent branch, target branch
 **XY Code**:
 git porcelain-v2's two-character state pair (X = staged/index state, Y =
 working-tree state), carried raw and unmodified in Pending File Entries — e.g.
-`.M`, `M.`, `MM`, `??`. The single source of truth for pending file state;
-display letters and markers are derived by Renderers, never stored.
+`.M`, `M.`, `MM`, `??`. The single source of truth for pending file state; a
+file's Change Groups and Badges are derived from it by the model, never stored
+in Core.
 _Avoid_: status letter (derived), status flag
+
+**Badge**:
+The letter a File Entry shows in one Change Group — `M`, `A`, `D`, `R`, `U` for
+untracked, `!` for a conflict — and the highlight it is drawn in.
+_Avoid_: status, marker
 
 **Mixed State**:
 A file whose XY Code has both characters set (staged, then modified again,
-e.g. `MM`). Rendered as the working-tree letter plus the `✱` marker.
+e.g. `MM`). It is a row in Staged Changes with its index Badge and a row in
+Changes with its working-tree Badge.
 _Avoid_: partially staged, dirty-staged
 
 **Refresh**:
@@ -144,3 +181,15 @@ directory steers SCM without SCM knowing it exists. Keeping one Sidebar Activity
 on screen is the user's config's job, through Handoff and `on_explorer`. Moving
 the cursor into the Panel does not refresh it, and the Panel shows no
 in-progress indicator.
+
+## VS Code Source Control layout (2026-11-16)
+
+The Panel is laid out like VS Code's Source Control view and can change a
+repository, not only show it. Core still only reads; the new Actions module
+writes. Rows replace the old header-and-file items, grouped into Change Groups
+with a list or tree View Mode. The native Renderer needs a Sprite host with
+decorated list rows (`virtual-list-rows-v2`) and falls back to the terminal
+Renderer without it. Core lists every untracked file by name, reports
+non-ASCII paths as their real names, and reads without taking git's index
+lock, so a refresh never makes a stage or commit fail. Committed File Entries
+remain, as a Change Group VS Code does not have. Diffs are still out of scope.

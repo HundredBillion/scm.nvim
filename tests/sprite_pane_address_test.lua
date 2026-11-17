@@ -33,7 +33,7 @@ end
 open()
 local request = host:messages('open')[1]
 assert(request.pane == host.pane, 'SCM preserves full pane address')
-assert(request.description.root.heading.text == 'SOURCE CONTROL', 'source control dock opens')
+assert(request.description.root.heading.text == 'Source Control', 'source control dock opens')
 assert(scm.focus('left'), 'SCM accepts focus')
 assert(vim.wait(3000, function() return #host:messages('focus') > 0 end), 'focus reaches host')
 scm.toggle()

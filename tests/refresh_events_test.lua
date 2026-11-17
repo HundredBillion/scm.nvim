@@ -51,7 +51,7 @@ vim.wait(150, function() return false end)
 assert(renders==before, 'closed view discards in-flight result')
 workspace.toggle()
 wait_scans(6,5)
-assert(rows[1].text:find('a',1,true), 'reopened view receives fresh entries')
+assert(rows[1].label:find('a',1,true), 'reopened view receives fresh entries')
 workspace.close()
 print('OK refresh events: 12 saves = 1 scan; 12 focus events = 2 scans; no rediscovery')
 
