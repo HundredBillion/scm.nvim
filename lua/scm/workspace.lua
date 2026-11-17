@@ -58,14 +58,27 @@ local function editor(state)
       and vim.api.nvim_win_get_config(win).relative == ''
       and vim.bo[vim.api.nvim_win_get_buf(win)].buftype == ''
   end
-  local win = vim.api.nvim_get_current_win()
-  if not valid(win) then win = state.editor end
-  if not valid(win) then
-    for _, candidate in ipairs(vim.api.nvim_tabpage_list_wins(state.tab)) do
-      if valid(candidate) then win = candidate; break end
+  -- A window showing a throwaway page, such as a start screen: nothing is lost
+  -- by opening a file over it. A fixed-width window is a sidebar, the Panel's
+  -- own split included, and is never taken.
+  local function replaceable(candidate)
+    if vim.api.nvim_win_get_config(candidate).relative ~= '' or vim.wo[candidate].winfixwidth then return false end
+    local buf = vim.api.nvim_win_get_buf(candidate)
+    return vim.bo[buf].buftype == 'nofile' and vim.bo[buf].bufhidden == 'wipe' and not vim.bo[buf].buflisted
+  end
+  local function pick()
+    for _, known in ipairs({vim.api.nvim_get_current_win(), state.editor or false}) do
+      if valid(known) then return known end
+    end
+    local windows = vim.api.nvim_tabpage_list_wins(state.tab)
+    for _, usable in ipairs({valid, replaceable}) do
+      for _, candidate in ipairs(windows) do
+        if usable(candidate) then return candidate end
+      end
     end
   end
-  if not valid(win) then
+  local win = pick()
+  if not win then
     vim.cmd('botright vsplit')
     win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, vim.api.nvim_create_buf(true, false))
