@@ -159,6 +159,50 @@ function M.rows(opts, rows, ui, assets)
   return out
 end
 
+-- The fields of a row Sprite draws that hold one value each.
+local SCALARS = {
+  'id', 'text', 'indent', 'kind', 'height', 'placeholder', 'trailing', 'cursor', 'icon',
+  'leading', 'count', 'bold', 'description', 'strikethrough',
+}
+-- Whether two lists of small records, guides or actions, say the same.
+local function same_list(a, b, first, second)
+  if a == nil or b == nil then return a == b end
+  if #a ~= #b then return false end
+  for i = 1, #a do
+    if a[i][first] ~= b[i][first] or a[i][second] ~= b[i][second] then return false end
+  end
+  return true
+end
+-- Whether two rows built by M.rows would draw the same.
+local function same_row(a, b)
+  for i = 1, #SCALARS do
+    local key = SCALARS[i]
+    if a[key] ~= b[key] then return false end
+  end
+  local badge, other = a.badge, b.badge
+  if (badge == nil) ~= (other == nil) then return false end
+  if badge and (badge.text ~= other.text or badge.color ~= other.color) then return false end
+  return same_list(a.guides, b.guides, 'offset', 'id') and same_list(a.actions, b.actions, 'id', 'icon')
+end
+
+-- Put the table of `kept`, the rows of the last frame by id, in place of
+-- each of `rows` that draws the same. Sprite is told that a table it has
+-- seen is unchanged, and then spends nothing on it; and two frames are the
+-- same frame exactly when they hold the same tables. Returns the rows by id.
+function M.reuse(kept, rows)
+  local by_id = {}
+  for i = 1, #rows do
+    local row = rows[i]
+    local old = kept[row.id]
+    if old and same_row(old, row) then
+      row = old
+      rows[i] = old
+    end
+    by_id[row.id] = row
+  end
+  return by_id
+end
+
 -- Do, ahead of the first open, the work an open would otherwise wait for:
 -- finding the icon theme and reading the icons these rows use.
 function M.prewarm(opts, rows, ui)
@@ -191,7 +235,8 @@ local EDIT_KEYS = {
 }
 
 function M.open(opts, action, ready, failed)
-  local view = {closed=false, revision=0, selected=1, rows_value={}, ui={}, registered={}, inline_edit=true}
+  local view = {closed=false, revision=0, selected=1, rows_value={}, ui={}, registered={}, inline_edit=true,
+    kept={}}
   local function fail(err)
     if view.closed then return end
     view:close()
@@ -271,11 +316,20 @@ function M.open(opts, action, ready, failed)
     -- Building the description registers the header icons it names.
     description(opts, ui, assets)
     local rows = M.rows(opts, next_rows.rows, ui, assets)
+    view.kept = M.reuse(view.kept, rows)
     local selected = rows[next_rows.index] and rows[next_rows.index].id
-    -- A refresh that found nothing new draws the frame the host already has.
-    -- Sending it again would cost a megabyte for a long list, many times over.
+    -- A refresh that found nothing new draws the frame the host already has,
+    -- and nothing is sent. Unchanged rows are the same tables, so the frames
+    -- are compared by identity.
+    local function unchanged(sent)
+      if #sent ~= #rows then return false end
+      for i = 1, #rows do
+        if sent[i] ~= rows[i] then return false end
+      end
+      return true
+    end
     if view.applied and view.sent and view.sent.selected == selected and view.described == description_key(ui)
-      and vim.deep_equal(view.sent.rows, rows) then
+      and unchanged(view.sent.rows) then
       view.rows_value, view.ui, view.selected = next_rows.rows, ui, next_rows.index
       frame_landed()
       return
@@ -428,7 +482,8 @@ function M.open(opts, action, ready, failed)
   Icons.reset()
   local assets = {}
   local first = description(opts, {}, assets)
-  sprite.open({side='left', width=opts.native_width or 300, description=first,
+  -- reuse_rows: a row table passed to the dock again is an unchanged row.
+  sprite.open({side='left', width=opts.native_width or 300, description=first, reuse_rows=true,
     on_event=event, on_close=function(reason) fail(reason) end}, function(open_err, dock)
     if view.closed then if dock then dock:close() end; return end
     if open_err then fail(open_err); return end

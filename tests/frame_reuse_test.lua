@@ -55,6 +55,20 @@ vim.fn.writefile({'y'}, root .. '/second.lua')
 vim.api.nvim_exec_autocmds('FocusGained', {})
 assert(vim.wait(5000, function() ack(); return #frames > sent end, 10), 'a new file is sent to the dock')
 settle()
+-- A row that did not change is the same table as before, which is how Sprite
+-- knows not to work it out again; the dock was opened on that understanding.
+assert(request.reuse_rows == true, 'the dock is opened with reuse_rows')
+local function row_named(frame, text)
+  for _, row in ipairs(frame.rows) do
+    if row.text == text then return row end
+  end
+end
+local before, after = frames[sent], frames[#frames]
+assert(row_named(before, 'hello.lua') and rawequal(row_named(before, 'hello.lua'), row_named(after, 'hello.lua')),
+  'an unchanged row is passed again as the same table')
+assert(row_named(after, 'second.lua') and not row_named(before, 'second.lua'), 'beside the new row')
+assert(not rawequal(row_named(before, 'Changes'), row_named(after, 'Changes'))
+  and row_named(after, 'Changes').count == '2', 'and a row whose count changed is a new table')
 sent = #frames
 
 -- Moving the selection sends only the selection, and later frames know it.

@@ -155,4 +155,33 @@ local few = model.rows({{path='/r/big', name='big', branch='b', files=many}}, {l
 local shown = 0
 for _, row in ipairs(few) do if row.kind == 'file' then shown = shown + 1 end end
 assert(shown == 3, 'the limit is an option')
+-- Rows that draw the same are told apart from rows that do not, field by field.
+do
+  local view = require('scm.views.sprite')
+  local function row()
+    return {id='file:a', text='a.lua', indent=8, icon='lua', description='src', strikethrough=true,
+      badge={text='M', color='#e2c08d'}, guides={{offset=8, id='group'}}, actions={{id='stage', icon='add'}}}
+  end
+  local first = row()
+  local kept = view.reuse({}, {first})
+  assert(kept['file:a'] == first, 'a new row is kept by its id')
+  local again = {row()}
+  view.reuse(kept, again)
+  assert(rawequal(again[1], first), 'a row that draws the same is replaced by the table kept')
+  for _, change in ipairs({
+    function(r) r.text = 'b.lua' end, function(r) r.indent = 16 end, function(r) r.icon = nil end,
+    function(r) r.description = 'lib' end, function(r) r.strikethrough = nil end, function(r) r.count = '2' end,
+    function(r) r.badge.text = 'A' end, function(r) r.badge.color = '#81b88b' end, function(r) r.badge = nil end,
+    function(r) r.guides[1].id = 'other' end, function(r) r.guides[1].offset = 16 end, function(r) r.guides = {} end,
+    function(r) r.actions[1].id = 'unstage' end, function(r) r.actions = nil end,
+    function(r) r.actions[2] = {id='discard', icon='discard'} end, function(r) r.cursor = 0 end,
+    function(r) r.kind = 'input' end, function(r) r.leading = 'blank' end, function(r) r.bold = true end,
+  }) do
+    local changed = row()
+    change(changed)
+    local list = {changed}
+    view.reuse(kept, list)
+    assert(rawequal(list[1], changed), 'a row that draws differently stays its own table: ' .. vim.inspect(changed))
+  end
+end
 print('OK native view')
