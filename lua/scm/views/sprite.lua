@@ -29,7 +29,7 @@ local BADGE_COLORS = {
   ScmModified='#e2c08d', ScmAdded='#81b88b', ScmDeleted='#c74e39', ScmRenamed='#73c991',
   ScmUntracked='#73c991', ScmConflict='#e4676b', ScmCommitted='#75beff',
 }
-local ACTION_ICONS = {open='go-to-file', discard='discard', stage='add', unstage='remove'}
+local ACTION_ICONS = {file='go-to-file', discard='discard', stage='add', unstage='remove'}
 
 local function colors(opts)
   return vim.tbl_extend('force', COLORS, (opts.native or {}).colors or {})

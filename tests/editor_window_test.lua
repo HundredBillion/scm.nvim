@@ -54,6 +54,15 @@ local function file_row()
   end
 end
 local scm = require('scm')
+-- The windows that hold text: a diff's overview strip floats over its window.
+local function windows()
+  return #vim.tbl_filter(function(win) return vim.api.nvim_win_get_config(win).relative == '' end,
+    vim.api.nvim_tabpage_list_wins(0))
+end
+-- Selecting a file shows its diff, once git has answered.
+local function diff_shown()
+  return vim.wait(5000, function() return vim.api.nvim_buf_get_name(0) == 'scm://' .. hello .. ' (diff)' end, 20)
+end
 
 -- Native Panel: the dock is not a window, so the start screen is the only one.
 local welcome, window = start_screen()
@@ -62,8 +71,8 @@ scm.toggle()
 assert(vim.wait(5000, function() ack(); return file_row() end, 20), 'the dock lists the file')
 request.on_event({type='list_click', revision=dock.revision, id=file_row().id, count=1, button='left', modifiers=''})
 ack()
-assert(vim.api.nvim_buf_get_name(0) == hello, 'native: the file opens')
-assert(#vim.api.nvim_tabpage_list_wins(0) == 1, 'native: no window is added, got ' .. vim.inspect(filetypes()))
+assert(diff_shown(), 'native: the file opens')
+assert(windows() == 1, 'native: no window is added, got ' .. vim.inspect(filetypes()))
 assert(vim.api.nvim_get_current_win() == window, 'native: the file takes the start screen window')
 assert(not vim.api.nvim_buf_is_valid(welcome), 'native: the start screen is gone')
 scm.toggle()
@@ -88,8 +97,8 @@ local side = panel()
 vim.api.nvim_set_current_win(side)
 vim.api.nvim_win_set_cursor(side, {line_of('hello.lua'), 0})
 vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<CR>', true, false, true), 'x', false)
-assert(vim.api.nvim_buf_get_name(0) == hello, 'terminal: the file opens')
-assert(#vim.api.nvim_tabpage_list_wins(0) == 2, 'terminal: Panel and file only, got ' .. vim.inspect(filetypes()))
+assert(diff_shown(), 'terminal: the file opens')
+assert(windows() == 2, 'terminal: Panel and file only, got ' .. vim.inspect(filetypes()))
 assert(vim.api.nvim_get_current_win() == window, 'terminal: the file takes the start screen window')
 assert(vim.api.nvim_win_is_valid(side) and vim.bo[vim.api.nvim_win_get_buf(side)].filetype == 'scm', 'terminal: the Panel keeps its split')
 scm.toggle()
@@ -106,6 +115,6 @@ scm.toggle()
 assert(vim.wait(5000, function() ack(); return file_row() end, 20), 'the dock lists the file again')
 request.on_event({type='list_click', revision=dock.revision, id=file_row().id, count=1, button='left', modifiers=''})
 ack()
-assert(vim.api.nvim_buf_get_name(0) == hello, 'the file opens beside kept scratch text')
-assert(vim.api.nvim_buf_is_valid(notes) and #vim.api.nvim_tabpage_list_wins(0) == 2, 'kept scratch text keeps its window')
+assert(diff_shown(), 'the file opens beside kept scratch text')
+assert(vim.api.nvim_buf_is_valid(notes) and windows() == 2, 'kept scratch text keeps its window')
 print('OK editor window: a file opens over a start screen, not beside it')

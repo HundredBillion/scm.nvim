@@ -162,17 +162,16 @@ local function parse_name_status(stdout)
   while index <= #fields do
     local status = fields[index]
     index = index + 1
-    local path
+    -- A rename or copy lists the name it came from, then its name now.
+    local path, orig
     if status:match("^[RC]") then
-      index = index + 1
-      path = fields[index]
-      index = index + 1
-    else
-      path = fields[index]
+      orig = fields[index]
       index = index + 1
     end
+    path = fields[index]
+    index = index + 1
     if path then
-      files[#files + 1] = { path = path, commit_status = status }
+      files[#files + 1] = { path = path, orig = orig, commit_status = status }
     end
   end
   return files

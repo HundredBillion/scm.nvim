@@ -33,6 +33,8 @@ local function refresh(state, request)
       if not err then state.entries = entries end
       state.error = err
       render(state)
+      -- What a diff on screen compares may be what just changed.
+      require('scm.diff').reload()
     end,
     progress = function(entries)
       state.entries = entries
@@ -56,7 +58,9 @@ local function editor(state)
     return win and vim.api.nvim_win_is_valid(win)
       and vim.api.nvim_win_get_tabpage(win) == state.tab
       and vim.api.nvim_win_get_config(win).relative == ''
-      and vim.bo[vim.api.nvim_win_get_buf(win)].buftype == ''
+      and (vim.bo[vim.api.nvim_win_get_buf(win)].buftype == ''
+        -- A diff is shown where the editor is, and the next file replaces it.
+        or vim.b[vim.api.nvim_win_get_buf(win)].scm_diff == true)
   end
   -- A window showing a throwaway page, such as a start screen: nothing is lost
   -- by opening a file over it. A fixed-width window is a sidebar, the Panel's
@@ -284,6 +288,16 @@ local function menu(state)
     end)
   end)
 end
+-- Open the file a row names, rather than its diff.
+local function open_file(state, row)
+  if vim.fn.filereadable(row.file) ~= 1 then
+    vim.notify('SCM: this file is deleted, so there is no file to open; select it to see what was removed',
+      vim.log.levels.INFO)
+    return
+  end
+  editor(state)
+  vim.cmd.edit(vim.fn.fnameescape(row.file))
+end
 -- Actions that belong to typing in the commit box. Anything else ends it.
 local EDITING = {edit=true, edit_end=true, edit_next=true, commit=true}
 -- `index` is the row the action is for; nil keeps the current selection, and
@@ -337,18 +351,18 @@ local function action(state, name, index, arg)
       state.ui.collapsed[row.id] = (name == 'collapse' or (name == 'open' and row.expanded)) or nil
       render(state)
     elseif name == 'collapse' then select_parent(state, state.selected)
-    elseif row.kind == 'file' and name == 'open' then
-      if vim.fn.filereadable(row.file) ~= 1 then
-        vim.notify('SCM: file is deleted or unavailable; historical viewing will be provided by prism.nvim', vim.log.levels.INFO)
-        return
-      end
+    -- A conflicted file is opened itself: its markers are what to work on.
+    elseif row.kind == 'file' and name == 'open' and row.group ~= 'merge' then
       editor(state)
-      vim.cmd.edit(vim.fn.fnameescape(row.file))
+      require('scm.diff').open({repo=row.entry.path, path=row.path, file=row.file, group=row.group,
+        orig=row.fentry.orig, base=row.entry.comparison_base, untracked=row.untracked})
+    elseif row.kind == 'file' and name == 'open' then open_file(state, row)
     end
+  elseif row and row.kind == 'file' and name == 'file' then open_file(state, row)
   end
 end
 -- Run a Panel action by name on the selected row, for user keymaps: "open",
--- "expand", "collapse", "stage", "unstage", "stage_all", "unstage_all",
+-- "file", "expand", "collapse", "stage", "unstage", "stage_all", "unstage_all",
 -- "discard", "compose", "commit", "view", "fold", "menu", "refresh", "close".
 -- False when the Panel is closed.
 function M.act(name)
@@ -410,6 +424,7 @@ function M.setup(opts)
   end
   end
   highlights()
+  require('scm.diff').setup()
   local group = vim.api.nvim_create_augroup('ScmWorkspace', {clear=true})
   vim.api.nvim_create_autocmd('ColorScheme', {group=group, callback=highlights})
   vim.api.nvim_create_autocmd({'BufWritePost','FocusGained'}, {group=group, callback=function(ev)

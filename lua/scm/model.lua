@@ -21,17 +21,18 @@ M.GROUPS = {
 }
 
 -- What a row can do, by kind and Change Group. Renderers show these as
--- buttons; the workspace refuses anything not listed.
+-- buttons; the workspace refuses anything not listed. "file" opens the file
+-- itself, where activating the row shows its diff.
 local FILE_ACTIONS = {
-  merge = { "open", "stage" },
-  staged = { "open", "unstage" },
-  changes = { "open", "discard", "stage" },
-  committed = { "open" },
+  merge = { "file", "stage" },
+  staged = { "file", "unstage" },
+  changes = { "file", "discard", "stage" },
+  committed = { "file" },
 }
 local CONTAINER_ACTIONS = { merge = { "stage" }, staged = { "unstage" }, changes = { "stage" } }
 -- A file added with `git add -N` has nothing in the index to restore, so
 -- discarding it would only empty it.
-local INTENT_TO_ADD_ACTIONS = { "open", "stage" }
+local INTENT_TO_ADD_ACTIONS = { "file", "stage" }
 
 function M.input_id(repo)
   return "input:" .. repo

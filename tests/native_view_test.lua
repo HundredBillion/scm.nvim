@@ -58,7 +58,7 @@ assert(main.icon and not main.leading, 'a file in the list has an icon and no ch
 assert(main.guides[1].offset == 8 and main.guides[1].id == staged.id, 'a file is guided by its group')
 local old = by_text('old.lua')
 assert(old.strikethrough == true and old.badge.text == 'D', 'a deleted file is struck through')
-assert(vim.deep_equal(vim.tbl_map(function(a) return a.id end, old.actions), {'open', 'discard', 'stage'}))
+assert(vim.deep_equal(vim.tbl_map(function(a) return a.id end, old.actions), {'file', 'discard', 'stage'}))
 for _, row in ipairs(last().rows) do
   for _, name in ipairs({'icon', 'leading', 'trailing'}) do
     if row[name] then
