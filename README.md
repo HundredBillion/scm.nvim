@@ -138,19 +138,19 @@ the same change is explained once.
 
 A Review adds four things around the diff:
 
-- **A Tour.** The bar under the header names the step you are on, with a
-  title and one sentence about it. `]t` and `[t` move between steps, and the
-  gutter marks the lines of the current one.
+- **A Tour.** The bar under the header shows how far through the steps you
+  are, then the step's title and one sentence about it. `]t` and `[t` move
+  between steps, and the gutter marks the lines of the current one.
 - **The Pane.** A box floating at the right explains the line under the
   cursor, and no other: what it was before, what it is now, and a paragraph
-  about it. It sits at the top right and moves to the bottom right only when
+  about it. Its border names the line and lists its keys. It sits at the top right and moves to the bottom right only when
   it would not fit above your line, so it never covers the line you are on
   and always ends above the map. In a short window the paragraph gives way
   first; in a narrow one the Pane is a single row and `K` opens the rest.
 - **If paused here.** For a line that sets a value, the Pane shows what the
-  values would be just after that line ran. These are the Explainer's
-  prediction and are always labelled "predicted"; they are not recorded from
-  a real run.
+  values would be just after that line ran, in a warm block with an amber
+  edge. These are the Explainer's prediction and are always labelled
+  "predicted · not a real run"; they are not recorded from a real run.
 - **How this line gets run.** A strip under the diff maps the calls that
   lead to the line: what runs right away, what the program runs later, and
   what happens outside it. In a Sprite Terminal with a bottom dock the map is

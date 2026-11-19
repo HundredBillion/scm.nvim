@@ -6,9 +6,11 @@
 -- puts it on screen.
 local M = {}
 
--- The Pane's text area is this many cells wide; its border adds two.
+-- The Pane's text is this many cells wide; two cells of space at each side
+-- and its border are around it.
 M.WIDTH = 48
--- A window narrower than this shows the Pane's first row alone.
+M.PAD = 2
+-- A window narrower than this shows one row of the Pane alone.
 M.NARROW = 100
 -- The most rows of the paragraph shown in the Pane.
 M.MAX_PROSE = 6
@@ -100,84 +102,97 @@ function M.about(review, meta, row)
     detail=own and own.detail, paused=line.kind == '+' and new and new.paused or nil}
 end
 
-local function header(about, tail)
+-- The title set into the Pane's top border: the line's number, and whether
+-- it was added or removed.
+function M.title(about)
   local line = about.line
-  local pieces = {{'▶ line ' .. tostring(line.new or line.old or ''), 'ScmReviewPaneLine'}, {'  ', 'ScmReviewPaneLabel'}}
+  local title = {{(' Line %s '):format(line.new or line.old or ''), 'ScmReviewPaneLine'}}
   if line.kind == '+' then
-    vim.list_extend(pieces, {{'+', 'ScmReviewPaneAdd'}, {' added', 'ScmReviewPaneLabel'}})
+    title[#title + 1] = {' added ', 'ScmReviewPaneAdded'}
   elseif line.kind == '-' then
-    vim.list_extend(pieces, {{'−', 'ScmReviewPaneDelete'}, {' removed', 'ScmReviewPaneLabel'}})
+    title[#title + 1] = {' removed ', 'ScmReviewPaneRemoved'}
   end
-  vim.list_extend(pieces, tail or {})
-  pieces.band = true
-  return pieces
+  title[#title + 1] = {' ', 'ScmReviewPaneBorder'}
+  return title
 end
 
-local KEY = {{' · ', 'ScmReviewPaneLabel'}, {'K', 'ScmReviewPaneKey'}, {' full explanation', 'ScmReviewPaneLabel'}}
+-- The keys set into the Pane's bottom border.
+M.FOOTER = {{' K', 'ScmReviewPaneKey'}, {' more · ', 'ScmReviewPaneLabel'}, {'\\a', 'ScmReviewPaneKey'},
+  {' ask · ', 'ScmReviewPaneLabel'}, {'\\e', 'ScmReviewPaneKey'}, {' hide ', 'ScmReviewPaneLabel'}}
 
--- The Pane for `about` as rows of {text, highlight} pieces, in at most `room`
--- rows. A row with `band` is the heading; one with `bar` is part of "if
--- paused here". When everything does not fit, the paragraph gives way and
--- "if paused here" does not; when even that does not fit, or `narrow` is
--- set, the heading stands alone. Also returns true when it stands alone.
+local EDGE = {'▏ ', 'ScmReviewPaneEdge'}
+
+-- The Pane for `about` as rows of {text, highlight} pieces, `width` cells
+-- wide and at most `room` rows, the empty rows above and below counted. A
+-- row with `tint` is part of "if paused here": a warm block with an amber
+-- edge. When everything does not fit, the paragraph gives way and "if
+-- paused here" does not; when even that does not fit, or `narrow` is set,
+-- one row stands alone. Also returns true when it stands alone.
 function M.rows(about, width, room, narrow)
   local line = about.line
   if line.kind ~= '+' and line.kind ~= '-' then
-    return {header(about, {{'no change on this line', 'ScmReviewPaneLabel'}})}, true
+    return {{{'no change on this line', 'ScmReviewPaneLabel'}}}, true
   end
   if not (about.before or about.now or about.detail or about.paused) then
-    return {header(about, {{' · no note for this line', 'ScmReviewPaneLabel'}})}, true
+    return {{{'no note for this line', 'ScmReviewPaneLabel'}}}, true
   end
-  local text_width = width - 2
-  local values = about.paused and about.paused.values or {}
-  -- "before", "now" and the names of the values share one column.
-  local label = 6
-  for _, value in ipairs(values) do label = math.max(label, math.min(cells(value.name), 16)) end
-  label = label + 2
-  local function labelled(name, text, highlight, out, bar)
+  local ALONE = {{{'K', 'ScmReviewPaneKey'}, {' full explanation', 'ScmReviewPaneLabel'}}}
+  if narrow then return ALONE, true end
+  -- The empty row above the first line and below the last.
+  room = room - 2
+  local function labelled(name, text, highlight, out, label, prefix, tint)
+    local lead = prefix and cells(prefix[1]) or 0
     -- A name too long for its column takes rows of its own, above what it names.
     if cells(name) > label - 2 then
-      for _, part in ipairs(M.wrap(name, text_width)) do
-        local row = {{part, 'ScmReviewPaneLabel'}}
-        row.bar = bar
+      for _, part in ipairs(M.wrap(name, width - lead)) do
+        local row = {prefix, {part, 'ScmReviewPaneLabel'}}
+        if not prefix then table.remove(row, 1) end
+        row.tint = tint
         out[#out + 1] = row
       end
       name = ''
     end
-    for i, part in ipairs(M.wrap(text, math.max(10, text_width - label))) do
+    for i, part in ipairs(M.wrap(text, math.max(10, width - lead - label))) do
       local shown = i == 1 and name or ''
-      local row = fit({{shown .. (' '):rep(math.max(1, label - cells(shown))), 'ScmReviewPaneLabel'}, {part, highlight}},
-        text_width)
-      row.bar = bar
+      local row = {}
+      if prefix then row[1] = prefix end
+      row[#row + 1] = {shown .. (' '):rep(math.max(1, label - cells(shown))), 'ScmReviewPaneLabel'}
+      row[#row + 1] = {part, highlight}
+      row = fit(row, width)
+      row.tint = tint
       out[#out + 1] = row
     end
   end
-  local head = {header(about)}
-  if about.before then labelled('before', about.before, 'ScmReviewPaneText', head) end
-  if about.now then labelled('now', about.now, 'ScmReviewPaneGist', head) end
+  local head = {}
+  if about.before then labelled('was', about.before, 'ScmReviewPaneText', head, 5) end
+  if about.now then labelled('now', about.now, 'ScmReviewPaneGist', head, 5) end
   local tail = {}
+  local values = about.paused and about.paused.values or {}
   if about.paused then
-    local function bar(pieces)
-      local row = fit(pieces, text_width)
-      row.bar = true
+    local function block(pieces)
+      local row = fit({EDGE, unpack(pieces)}, width)
+      row.tint = true
       tail[#tail + 1] = row
     end
-    bar({{'IF PAUSED HERE', 'ScmReviewPaneTitle'}, {'  predicted', 'ScmReviewPanePredicted'},
-      {' · not a real run', 'ScmReviewPaneLabel'}})
-    for _, part in ipairs(about.paused.when and M.wrap(about.paused.when, text_width) or {}) do
-      bar({{part, 'ScmReviewPaneLabel'}})
+    block({{'If paused here  ', 'ScmReviewPaneTitle'}, {' predicted · not a real run ', 'ScmReviewPanePredicted'}})
+    for _, part in ipairs(about.paused.when and M.wrap(about.paused.when, width - 2) or {}) do
+      block({{part, 'ScmReviewPaneProse'}})
     end
+    -- The values' names share one column.
+    local label = 6
+    for _, value in ipairs(values) do label = math.max(label, math.min(cells(value.name), 16)) end
+    label = label + 2
     for _, value in ipairs(values) do
-      labelled(value.name, value.value, 'ScmReviewPaneValue', tail, true)
-      for i, part in ipairs(value.note and M.wrap(value.note, math.max(10, text_width - label - 2)) or {}) do
-        bar({{(' '):rep(label) .. (i == 1 and '↳ ' or '  ') .. part, 'ScmReviewPaneLabel'}})
+      labelled(value.name, value.value, 'ScmReviewPaneValue', tail, label, EDGE, true)
+      for _, part in ipairs(value.note and M.wrap(value.note, math.max(10, width - 2 - label)) or {}) do
+        block({{(' '):rep(label) .. part, 'ScmReviewPaneGloss'}})
       end
     end
   end
-  if narrow or room < #head + #tail then return {header(about, KEY)}, true end
+  if room < #head + #tail then return ALONE, true end
   local names = {}
   for _, value in ipairs(values) do names[value.name] = true end
-  local wrapped = about.detail and M.wrap(about.detail, text_width) or {}
+  local wrapped = about.detail and M.wrap(about.detail, width) or {}
   local gap_prose, gap_tail = #wrapped > 0 and 1 or 0, #tail > 0 and 1 or 0
   local shown = math.min(#wrapped, M.MAX_PROSE)
   local free = room - #head - #tail - gap_prose - gap_tail
@@ -206,15 +221,17 @@ function M.rows(about, width, room, narrow)
   else
     for _, text in ipairs(wrapped) do body[#body + 1] = prose(text, names, 'ScmReviewPaneProse', 'ScmReviewPaneStrong') end
   end
-  local rows = head
+  local rows = {{}}
+  vim.list_extend(rows, head)
   if #body > 0 then
-    if gap_prose == 1 then rows[#rows + 1] = {} end
-    for _, pieces in ipairs(body) do rows[#rows + 1] = fit(pieces, text_width) end
+    if gap_prose == 1 and #head > 0 then rows[#rows + 1] = {} end
+    for _, pieces in ipairs(body) do rows[#rows + 1] = fit(pieces, width) end
   end
   if #tail > 0 then
-    if gap_tail == 1 then rows[#rows + 1] = {} end
+    if gap_tail == 1 and #rows > 1 then rows[#rows + 1] = {} end
     vim.list_extend(rows, tail)
   end
+  rows[#rows + 1] = {}
   return rows, false
 end
 

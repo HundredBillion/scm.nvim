@@ -38,18 +38,32 @@ function M.highlights()
   local green, red = hue(0x8fbf7a), hue(0xd07277)
   local function soft(alpha) return mix(fg, bg, alpha) end
   local current = mix(blue, bg, 0.26)
-  local pane = soft(0.05)
+  -- The Pane is a surface a step lighter than the code, with a quiet border.
+  local pane = soft(0.09)
   local bar = mix(blue, bg, 0.17)
+  local tour = soft(0.055)
+  -- Bold carries weight, not brightness: bold text is a shade under the editor's own.
+  local strong = soft(0.97)
+  -- "If paused here" is a faintly warm block inside the Pane.
+  local warm = mix(amber, pane, 0.045)
   for name, value in pairs({
     ScmReviewCurrentLine={bg=current},
-    ScmReviewPane={fg=soft(0.92), bg=pane}, ScmReviewPaneBorder={fg=mix(blue, bg, 0.34), bg=pane},
-    ScmReviewPaneHead={bg=mix(blue, pane, 0.13)}, ScmReviewPaneLine={fg=blue, bold=true},
-    ScmReviewPaneAdd={fg=green, bold=true}, ScmReviewPaneDelete={fg=red, bold=true},
-    ScmReviewPaneLabel={fg=soft(0.8)}, ScmReviewPaneText={fg=soft(0.96)}, ScmReviewPaneGist={fg=fg, bold=true},
-    ScmReviewPaneProse={fg=soft(0.9)}, ScmReviewPaneStrong={fg=fg, bold=true},
-    ScmReviewPaneTitle={fg=fg, bold=true}, ScmReviewPanePredicted={fg=amber}, ScmReviewPaneBar={fg=amber},
-    ScmReviewPaneValue={fg=teal, bold=true}, ScmReviewPaneKey={fg=fg, bold=true},
+    ScmReviewPane={fg=soft(0.92), bg=pane}, ScmReviewPaneBorder={fg=soft(0.31), bg=pane},
+    ScmReviewPaneLine={fg=blue, bg=pane, bold=true},
+    ScmReviewPaneAdded={fg=green, bg=mix(green, pane, 0.13), bold=true},
+    ScmReviewPaneRemoved={fg=red, bg=mix(red, pane, 0.13), bold=true},
+    ScmReviewPaneLabel={fg=soft(0.7)}, ScmReviewPaneText={fg=soft(0.86)}, ScmReviewPaneGist={fg=strong, bold=true},
+    ScmReviewPaneProse={fg=soft(0.92)}, ScmReviewPaneStrong={fg=strong, bold=true},
+    ScmReviewPaneTitle={fg=strong, bold=true}, ScmReviewPanePredicted={fg=amber, bg=mix(amber, warm, 0.13)},
+    ScmReviewPaneEdge={fg=amber}, ScmReviewPaneTint={bg=warm}, ScmReviewPaneGloss={fg=soft(0.8), italic=true},
+    ScmReviewPaneValue={fg=teal, bold=true}, ScmReviewPaneKey={fg=strong, bold=true},
     ScmReviewPaneMore={fg=soft(0.72), italic=true}, ScmReviewCut={fg=soft(0.72)},
+    ScmReviewTourRow={fg=soft(0.8), bg=tour}, ScmReviewTourEdge={fg=blue, bg=tour},
+    ScmReviewTourName={fg=blue, bg=tour, bold=true}, ScmReviewTourCount={fg=soft(0.72), bg=tour},
+    ScmReviewTourNow={fg=blue, bg=tour}, ScmReviewTourDone={fg=mix(blue, bg, 0.28), bg=tour},
+    ScmReviewTourTodo={fg=mix(blue, soft(0.24), 0.12), bg=tour},
+    ScmReviewTourTitle={fg=strong, bg=tour, bold=true}, ScmReviewTourSummary={fg=soft(0.8), bg=tour},
+    ScmReviewTourLines={fg=soft(0.64), bg=tour}, ScmReviewTourError={fg=red, bg=tour, bold=true},
     ScmReviewBar={fg=soft(0.9), bg=bar}, ScmReviewBarTitle={fg=fg, bg=bar, bold=true},
     ScmReviewBarDim={fg=soft(0.86), bg=bar}, ScmReviewBarDone={fg=green, bg=bar},
     ScmReviewBarDot={fg=blue, bg=bar}, ScmReviewPredictedBar={fg=amber, bg=bar},
@@ -196,56 +210,96 @@ local function signature(rows)
   return table.concat(parts, '\3')
 end
 
--- What the Tour bar of window `win` says: pieces at the left, and text at the right.
-local function bar_text(state, win)
+-- What the Tour bar of window `win` says: `lead`, the pieces it starts
+-- with; for a Tour step, its `title` and `summary`; and `right`, the lines
+-- the step covers, at the right of the first row. `width` is the bar's.
+local function bar_text(state, win, width)
   local service = Explainers.active()
   local name = service and service.name or 'an Explainer'
   if state.status == 'asking' then
     local seconds = math.floor((vim.uv.now() - state.started) / 1000)
-    return {{' ' .. name .. ' is reading this change… ', 'ScmReviewBarTitle'}, {seconds .. 's', 'ScmReviewBarDim'}}, ''
+    return {lead={{name .. ' is reading this change… ', 'ScmReviewTourTitle'}, {seconds .. 's', 'ScmReviewTourCount'}}}
   elseif state.status == 'failed' then
-    return {{' Could not explain this change: ', 'ScmReviewBarError'}, {state.error or '', 'ScmReviewBar'},
-      {'   \\e', 'ScmReviewBarTitle'}, {' try again', 'ScmReviewBarDim'}}, ''
+    return {lead={{'Could not explain this change: ', 'ScmReviewTourError'}, {state.error or '', 'ScmReviewTourRow'},
+      {'   \\e', 'ScmReviewTourTitle'}, {' try again', 'ScmReviewTourCount'}}}
   elseif state.status ~= 'ready' then
-    return {{' \\e', 'ScmReviewBarTitle'}, {' explain this change with ' .. name, 'ScmReviewBarDim'}}, ''
+    return {lead={{'\\e', 'ScmReviewTourTitle'}, {' explain this change with ' .. name, 'ScmReviewTourCount'}}}
   end
   local tour = state.data.tour
   if #tour == 0 then
-    return {{' REVIEW', 'ScmReviewBarTitle'}, {' · the pane at the right explains the line you are on', 'ScmReviewBarDim'}}, ''
+    return {lead={{'Review', 'ScmReviewTourName'}, {'  the pane at the right explains the line you are on', 'ScmReviewTourCount'}}}
   end
   local at = state.steps[win]
-  local pieces = {{' TOUR', 'ScmReviewBarTitle'},
-    {at and (' · step %d of %d  '):format(at, #tour) or (' · %d steps  '):format(#tour), 'ScmReviewBarTitle'}}
+  local lead = {{'Tour', 'ScmReviewTourName'},
+    {at and ('  %d of %d  '):format(at, #tour) or ('  %d steps  '):format(#tour), 'ScmReviewTourCount'}}
+  -- The progress: a heavy segment for each step done and the one you are on, a thin one for each to come.
+  local cells = width >= 110 and 3 or width >= 70 and 2 or 1
   for i = 1, #tour do
-    if i == at then pieces[#pieces + 1] = {'● ', 'ScmReviewBarDot'}
-    elseif state.visited[i] then pieces[#pieces + 1] = {'✓ ', 'ScmReviewBarDone'}
-    else pieces[#pieces + 1] = {'○ ', 'ScmReviewBarDim'} end
+    if i > 1 then lead[#lead + 1] = {' ', 'ScmReviewTourRow'} end
+    if i == at then lead[#lead + 1] = {('━'):rep(cells), 'ScmReviewTourNow'}
+    elseif state.visited[i] then lead[#lead + 1] = {('━'):rep(cells), 'ScmReviewTourDone'}
+    else lead[#lead + 1] = {('─'):rep(cells), 'ScmReviewTourTodo'} end
   end
   local step = at and tour[at]
   if not step then
-    pieces[#pieces + 1] = {' ]t', 'ScmReviewBarTitle'}
-    pieces[#pieces + 1] = {' start the tour', 'ScmReviewBarDim'}
-    return pieces, ''
+    vim.list_extend(lead, {{'   ]t', 'ScmReviewTourTitle'}, {' start the tour', 'ScmReviewTourCount'}})
+    return {lead=lead}
   end
-  pieces[#pieces + 1] = {' ' .. step.title, 'ScmReviewBarTitle'}
-  if step.summary then pieces[#pieces + 1] = {'   ' .. step.summary, 'ScmReviewBar'} end
-  local lines = step.from == step.to and ('line ' .. step.from) or ('lines ' .. step.from .. '–' .. step.to)
-  return pieces, lines .. ' '
+  return {lead=lead, title={{step.title, 'ScmReviewTourTitle'}}, summary=step.summary,
+    right=step.from == step.to and ('line ' .. step.from) or ('lines ' .. step.from .. '–' .. step.to)}
 end
 
 -- The most rows the Tour bar takes.
 local BAR_ROWS = 4
+local EDGE = {'▍ ', 'ScmReviewTourEdge'}
 
--- Break the Tour bar's pieces into rows `width` cells wide, at spaces. The
--- first row leaves `right` cells free at its end; later rows start one cell in.
-local function bar_rows(pieces, width, right, most)
-  local rows = Ui.wrap_pieces(pieces, width - 1, {first=width - right - 1, indent=1})
+-- The Tour bar's rows, `width` cells wide and at most `most` of them. Every
+-- row starts with the blue edge. A step's title follows the progress; its
+-- summary goes beside the title when both fit on the first row, and all of
+-- it under the title when not. What wraps hangs under where it started.
+local function bar_rows(spec, width, most)
+  local right = spec.right or ''
+  local lead_cells = 0
+  for _, piece in ipairs(spec.lead) do lead_cells = lead_cells + Ui.cells(piece[1]) end
+  -- The cells the first row has before the lines at its right.
+  local first = width - Ui.cells(EDGE[1]) - (right ~= '' and Ui.cells(right) + 4 or 1)
+  local inner = width - Ui.cells(EDGE[1]) - 1
+  local rows
+  if not spec.title then
+    rows = Ui.wrap_pieces(spec.lead, inner, {first=first})
+  else
+    local indent = lead_cells + 3
+    local function hang(pieces) return vim.list_extend({{(' '):rep(indent), 'ScmReviewTourRow'}}, pieces) end
+    local title = Ui.wrap_pieces(spec.title, inner - indent, {first=first - indent})
+    local summary = spec.summary
+    if summary and #title == 1 then
+      local used = 0
+      for _, piece in ipairs(title[1]) do used = used + Ui.cells(piece[1]) end
+      if used + 3 + Ui.cells(summary) <= first - indent then
+        title[1][#title[1] + 1] = {' — ' .. summary, 'ScmReviewTourSummary'}
+        summary = nil
+      end
+    end
+    rows = {vim.list_extend(vim.list_extend({}, spec.lead), {{'   ', 'ScmReviewTourRow'}})}
+    vim.list_extend(rows[1], title[1] or {})
+    for i = 2, #title do rows[#rows + 1] = hang(title[i]) end
+    for _, part in ipairs(summary and Ui.wrap(summary, inner - indent) or {}) do
+      rows[#rows + 1] = hang({{part, 'ScmReviewTourSummary'}})
+    end
+  end
   if #rows == 0 then rows[1] = {} end
   -- Only a window too short for it leaves any of the bar unsaid.
   if #rows > most then
     rows = vim.list_slice(rows, 1, most)
     local last = rows[most]
-    last[#last + 1] = {'…', last[#last] and last[#last][2] or 'ScmReviewBar'}
+    last[#last + 1] = {'…', 'ScmReviewTourRow'}
+  end
+  for _, row in ipairs(rows) do table.insert(row, 1, EDGE) end
+  if right ~= '' then
+    local used = 0
+    for _, piece in ipairs(rows[1]) do used = used + Ui.cells(piece[1]) end
+    rows[1][#rows[1] + 1] = {(' '):rep(math.max(1, width - used - Ui.cells(right) - 1)), 'ScmReviewTourRow'}
+    rows[1][#rows[1] + 1] = {right, 'ScmReviewTourLines'}
   end
   return rows
 end
@@ -261,15 +315,9 @@ local function draw_bar(win, state)
   if state.status == 'nothing' then close_bar(win); return end
   local info = vim.fn.getwininfo(win)[1]
   if info.height < 4 or info.width < 30 then close_bar(win); return end
-  local pieces, right = bar_text(state, win)
-  local rows = bar_rows(pieces, info.width, Ui.cells(right), math.max(1, math.min(BAR_ROWS, info.height - 3)))
-  -- Which lines the step covers stands at the right of the first row.
-  local first, used = rows[1], 0
-  for _, piece in ipairs(first) do used = used + Ui.cells(piece[1]) end
-  first[#first + 1] = {(' '):rep(math.max(1, info.width - Ui.cells(right) - used))}
-  first[#first + 1] = {right, 'ScmReviewBarDim'}
+  local rows = bar_rows(bar_text(state, win, info.width), info.width, math.max(1, math.min(BAR_ROWS, info.height - 3)))
   local bar = Ui.anchored(bars[win], {relative='win', win=win, row=0, col=0, width=info.width, height=#rows},
-    'ScmReviewBar', {zindex=21})
+    'ScmReviewTourRow', {zindex=21})
   bars[win], bar.rows = bar, #rows
   local drawn = signature(rows)
   if bar.changed or bar.drawn ~= drawn then
@@ -370,28 +418,50 @@ local function draw_pane(win, view, state)
   if room < 3 then hide_pane(win, state); return end
   pane.where = side
   local rows, alone = Pane.rows(about, Pane.WIDTH, room - 2, narrow)
-  -- Each row starts with a cell that is the amber edge of "if paused here", or blank.
+  local title = Pane.title(about)
+  local pad = (' '):rep(Pane.PAD)
+  -- A Pane that stands alone in a narrow window is no wider than its words and title.
+  local text_width = Pane.WIDTH
+  if alone then
+    text_width = 0
+    for _, piece in ipairs(rows[1]) do text_width = text_width + Ui.cells(piece[1]) end
+    local title_width = 2
+    for _, piece in ipairs(title) do title_width = title_width + Ui.cells(piece[1]) end
+    text_width = math.max(text_width, title_width - 2 * Pane.PAD)
+  end
+  -- Two cells of space at each side. A row of "if paused here" is a warm
+  -- block from its amber edge to the end of the text.
   local out = {}
   for i, pieces in ipairs(rows) do
-    local row = {pieces.bar and {'▌', 'ScmReviewPaneBar'} or {' '}}
-    vim.list_extend(row, pieces)
-    row.line_hl = pieces.band and 'ScmReviewPaneHead' or nil
+    local row = {{pad}}
+    local used = 0
+    for _, piece in ipairs(pieces) do
+      row[#row + 1] = piece
+      used = used + Ui.cells(piece[1])
+    end
+    if pieces.tint then
+      row[#row + 1] = {(' '):rep(math.max(0, text_width - used))}
+      row.fill = {#pad, 'ScmReviewPaneTint'}
+    end
     out[i] = row
   end
-  -- A heading that stands alone in a narrow window is no wider than its words.
-  local width = Pane.WIDTH
-  if alone and narrow then
-    width = 1
-    for _, piece in ipairs(out[1]) do width = width + Ui.cells(piece[1]) end
-  end
-  width = math.min(width, info.width - 6)
+  local width = math.min(text_width + 2 * Pane.PAD, info.width - 6)
   if width < 12 then hide_pane(win, state); return end
-  -- The overview strip keeps the window's last two cells.
+  -- The Pane sits against the overview strip, which keeps the window's last two cells.
   local col = info.width - width - 4
   local row = side == 'home' and bar_height(win) or info.height - #out - 2
-  pane = Ui.anchored(pane, {relative='win', win=win, row=row, col=col, width=width, height=#out}, 'ScmReviewPane',
-    {zindex=20, border='single'})
+  local place = {relative='win', win=win, row=row, col=col, width=width, height=#out}
+  local frame = {zindex=20, border={'╭', '─', '╮', '│', '╯', '─', '╰', '│'}, title=title, title_pos='left',
+    footer=not alone and Pane.FOOTER or nil, footer_pos=not alone and 'right' or nil}
+  pane = Ui.anchored(pane, place, 'ScmReviewPane', frame)
   panes[win] = pane
+  -- The title names the line, so it changes as the cursor moves.
+  local framed = signature({title}) .. tostring(alone)
+  if pane.framed ~= framed then
+    pane.framed = framed
+    vim.api.nvim_win_set_config(pane.win, {title=title, title_pos='left', footer=not alone and Pane.FOOTER or '',
+      footer_pos='right'})
+  end
   local drawn = signature(out)
   if pane.changed or pane.drawn ~= drawn then
     pane.drawn = drawn

@@ -97,7 +97,9 @@ function M.wrap(text, width)
 end
 
 -- Put rows of {text, highlight} pieces in `buf` and highlight them in
--- namespace `ns`. A row's `line_hl` highlights the whole row.
+-- namespace `ns`. A row's `line_hl` highlights the whole row, and its
+-- `fill` = {byte, highlight} the row from that byte to its end, under the
+-- pieces' own highlights.
 function M.write(buf, ns, rows)
   local lines, marks = {}, {}
   for i, pieces in ipairs(rows) do
@@ -109,6 +111,7 @@ function M.write(buf, ns, rows)
       end
     end
     if pieces.line_hl then marks[#marks + 1] = {i - 1, 0, 0, pieces.line_hl, true} end
+    if pieces.fill then marks[#marks + 1] = {i - 1, pieces.fill[1], #text, pieces.fill[2], false, 100} end
     lines[i] = text
   end
   local modifiable = vim.bo[buf].modifiable
@@ -119,8 +122,8 @@ function M.write(buf, ns, rows)
   for _, mark in ipairs(marks) do
     if mark[5] then
       vim.api.nvim_buf_set_extmark(buf, ns, mark[1], 0, {line_hl_group=mark[4]})
-    else
-      vim.api.nvim_buf_set_extmark(buf, ns, mark[1], mark[2], {end_col=mark[3], hl_group=mark[4]})
+    elseif mark[3] > mark[2] then
+      vim.api.nvim_buf_set_extmark(buf, ns, mark[1], mark[2], {end_col=mark[3], hl_group=mark[4], priority=mark[6]})
     end
   end
   return lines

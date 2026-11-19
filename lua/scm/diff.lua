@@ -127,6 +127,7 @@ end
 function M.highlights()
   local mix, color = Ui.mix, Ui.color
   local dark = vim.o.background == 'dark'
+  local strong = mix(color('Normal', 'fg', dark and 0xacb2be or 0x333333), color('Normal', 'bg', dark and 0x1e1e1e or 0xffffff), 0.97)
   local background = color('Normal', 'bg', dark and 0x1e1e1e or 0xffffff)
   local number = color('LineNr', 'fg', dark and 0x858585 or 0x237893)
   local add_line, delete_line = mix(0x9bb955, background, 0.2), mix(0xff0000, background, 0.2)
@@ -136,9 +137,10 @@ function M.highlights()
     ScmDiffAddNr={fg=number, bg=add_line}, ScmDiffDeleteNr={fg=number, bg=delete_line},
     ScmDiffAddSign={fg=dark and 0x81b88b or 0x2f7d32, bg=add_line},
     ScmDiffDeleteSign={fg=dark and 0xc74e39 or 0xb3261e, bg=delete_line},
-    ScmDiffHeader={fg=color('Normal', 'fg'), bg=background},
+    -- Bold carries weight, not brightness: nothing in the header is brighter than a shade under the text.
+    ScmDiffHeader={fg=strong, bg=background},
     ScmDiffSource={fg=color('Comment', 'fg', number), bg=background},
-    ScmDiffButton={fg=color('Normal', 'fg'), bg=background, bold=true},
+    ScmDiffButton={fg=strong, bg=background, bold=true},
     ScmDiffRuler={bg=background},
     ScmDiffRulerView={bg=mix(color('Normal', 'fg', dark and 0xcccccc or 0x333333), background, 0.14)},
     ScmDiffRulerAdd={bg=mix(0x9bb955, background, 0.6)}, ScmDiffRulerDelete={bg=mix(0xff0000, background, 0.6)},
