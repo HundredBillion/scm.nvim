@@ -3,6 +3,7 @@
 -- the map is a picture; anywhere else it is a small window of characters.
 -- There is one strip, under the diff the reader is in.
 local Flow = require('scm.review.flow')
+local Ui = require('scm.ui')
 local M = {}
 local ns = vim.api.nvim_create_namespace('scm.review.strip')
 
@@ -75,30 +76,6 @@ local function room(parent)
   return rows
 end
 
--- Rows of pieces as buffer lines and the highlights over them.
-local function write(buf, rows)
-  local lines, marks = {}, {}
-  for i, pieces in ipairs(rows) do
-    local text = ''
-    for _, piece in ipairs(pieces) do
-      if piece[1] ~= '' then
-        marks[#marks + 1] = {i - 1, #text, #text + #piece[1], piece[2]}
-        text = text .. piece[1]
-      end
-    end
-    lines[i] = text
-  end
-  vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
-  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  for _, mark in ipairs(marks) do
-    vim.api.nvim_buf_set_extmark(buf, ns, mark[1], mark[2], {end_col=mark[3], hl_group=mark[4]})
-  end
-end
-
-local function escape(text) return (text:gsub('%%', '%%%%')) end
-
 -- Show `rows` in a window under `parent`, with `heading` above them.
 local function window(parent, rows, heading)
   if strip and not (vim.api.nvim_win_is_valid(strip.win) and strip.parent == parent) then close_window() end
@@ -119,11 +96,8 @@ local function window(parent, rows, heading)
   local bar = ''
   if heading then
     -- A heading too long for the window loses its end, not its start.
-    local room = vim.api.nvim_win_get_width(strip.win) - 28
-    if vim.fn.strdisplaywidth(heading) > room then
-      heading = vim.fn.strcharpart(heading, 0, math.max(0, room - 1)) .. '…'
-    end
-    bar = '%#ScmReviewBarTitle# HOW THIS LINE GETS RUN  %#ScmReviewPredictedBar#≈ %#ScmReviewBarDim#' .. escape(heading)
+    heading = Ui.truncate(heading, vim.api.nvim_win_get_width(strip.win) - 28)
+    bar = '%#ScmReviewBarTitle# HOW THIS LINE GETS RUN  %#ScmReviewPredictedBar#≈ %#ScmReviewBarDim#' .. Ui.escape(heading)
   end
   if vim.wo[strip.win].winbar ~= bar then vim.wo[strip.win].winbar = bar end
   -- The heading is a row of the window too.
@@ -131,7 +105,8 @@ local function window(parent, rows, heading)
   if vim.api.nvim_win_get_height(strip.win) ~= height then
     pcall(vim.api.nvim_win_set_height, strip.win, height)
   end
-  write(strip.buf, rows)
+  Ui.write(strip.buf, ns, rows)
+  vim.bo[strip.buf].modifiable = false
 end
 
 local function description(svg, background)

@@ -8,6 +8,7 @@ local Prompt = require('scm.review.prompt')
 local Explainers = require('scm.review.explainers')
 local Pane = require('scm.review.pane')
 local Strip = require('scm.review.strip')
+local Ui = require('scm.ui')
 local M = {}
 local static = vim.api.nvim_create_namespace('scm.review.static')
 local bar_ns = vim.api.nvim_create_namespace('scm.review.bar')
@@ -20,24 +21,14 @@ local shown = true     -- whether the Pane is shown
 local map_brief        -- the reader's choice of one row or the whole map; nil follows the window
 local bars = {}        -- window -> the Tour bar floating at its top
 local panes = {}       -- window -> the Pane floating at its right, and the side it is on
-local answers = {}     -- "key:row:question" -> an answer already given
+local answers = {}     -- Review key -> "row:question:service:style" -> an answer already given
+local waiting = {}     -- the same, joined -> a question about one line still being answered
 local last_diff        -- the window of the diff the reader was last in
-
-local function mix(top, bottom, alpha)
-  local out = 0
-  for shift = 16, 0, -8 do
-    local t, b = bit.band(bit.rshift(top, shift), 255), bit.band(bit.rshift(bottom, shift), 255)
-    out = out + bit.lshift(math.floor(t * alpha + b * (1 - alpha) + 0.5), shift)
-  end
-  return out
-end
 
 -- The colours of the Review. Text is never brighter than the editor's own:
 -- a heading is bold, not whiter.
 function M.highlights()
-  local function color(name, key, fallback)
-    return vim.api.nvim_get_hl(0, {name=name, link=false})[key] or fallback
-  end
+  local mix, color = Ui.mix, Ui.color
   local dark = vim.o.background == 'dark'
   local bg = color('Normal', 'bg', dark and 0x1e1f22 or 0xffffff)
   local fg = color('Normal', 'fg', dark and 0xacb2be or 0x333333)
@@ -96,16 +87,20 @@ local function row_of(view, number)
 end
 
 local function current_step(view, state, win)
-  local line = view.meta[vim.api.nvim_win_get_cursor(win)[1]]
-  local at = line and line.new and Schema.step_at(state.data, line.new)
+  local row = vim.api.nvim_win_get_cursor(win)[1]
+  local line = view.meta[row]
+  local number = line and line.new
   -- On a removed line, the step is the one its change belongs to.
-  if not at and line and line.kind == '-' then
-    local row = vim.api.nvim_win_get_cursor(win)[1]
+  if not number and line and line.kind == '-' then
     while view.meta[row] and view.meta[row].kind == '-' do row = row + 1 end
-    local next_line = view.meta[row]
-    at = next_line and next_line.new and Schema.step_at(state.data, next_line.new) or nil
+    number = view.meta[row] and view.meta[row].new
   end
-  return at
+  if not number then return nil end
+  -- Steps may overlap: the one the reader walked to holds while the cursor is in it.
+  local held = state.steps[win]
+  local step = held and state.data.tour[held]
+  if step and number >= step.from and number <= step.to then return held end
+  return Schema.step_at(state.data, number)
 end
 
 -- What the prefix of the gutter shows for `row`: a mark on the line the
@@ -183,14 +178,22 @@ end
 local function close_bar(win)
   local bar = bars[win]
   bars[win] = nil
-  -- The window scrolls by its own rules again.
-  if bar and bar.scrolloff and vim.api.nvim_win_is_valid(win) then
-    vim.api.nvim_set_option_value('scrolloff', -1, {win=win, scope='local'})
+  if not bar then return end
+  -- The window scrolls by its own rules again: the reader's, if they set any.
+  if bar.scrolloff ~= nil and vim.api.nvim_win_is_valid(win) then
+    vim.api.nvim_set_option_value('scrolloff', bar.scrolloff, {win=win, scope='local'})
   end
-  if not (bar and vim.api.nvim_win_is_valid(bar.win)) then return end
-  if not pcall(vim.api.nvim_win_close, bar.win, true) then
-    vim.schedule(function() pcall(vim.api.nvim_win_close, bar.win, true) end)
+  Ui.close(bar.win)
+end
+
+-- A row list as one string, to tell whether what is on screen changed.
+local function signature(rows)
+  local parts = {}
+  for _, row in ipairs(rows) do
+    for _, piece in ipairs(row) do parts[#parts + 1] = piece[1] .. '\1' .. (piece[2] or '') end
+    parts[#parts + 1] = '\2' .. (row.line_hl or '')
   end
+  return table.concat(parts, '\3')
 end
 
 -- What the Tour bar of window `win` says: pieces at the left, and text at the right.
@@ -234,36 +237,9 @@ end
 local BAR_ROWS = 4
 
 -- Break the Tour bar's pieces into rows `width` cells wide, at spaces. The
--- first row leaves `first` cells free at its end; later rows start one cell in.
-local function bar_rows(pieces, width, first, most)
-  local rows, row, used = {}, {}, 0
-  local function limit() return #rows == 0 and width - first - 1 or width - 1 end
-  for _, piece in ipairs(pieces) do
-    for space, word in piece[1]:gmatch('(%s*)(%S*)') do
-      if space ~= '' or word ~= '' then
-        local token = space .. word
-        if used > 1 and used + vim.fn.strdisplaywidth(token) > limit() then
-          rows[#rows + 1] = row
-          row, used, token = {{' ', piece[2]}}, 1, word
-        end
-        -- A word wider than a whole row is broken where the row ends.
-        while vim.fn.strdisplaywidth(token) > limit() - used and limit() - used > 1 do
-          local part = vim.fn.strcharpart(token, 0, limit() - used)
-          while vim.fn.strdisplaywidth(part) > limit() - used do part = vim.fn.strcharpart(part, 0, vim.fn.strchars(part) - 1) end
-          if part == '' then break end
-          row[#row + 1] = {part, piece[2]}
-          rows[#rows + 1] = row
-          token = vim.fn.strcharpart(token, vim.fn.strchars(part))
-          row, used = {{' ', piece[2]}}, 1
-        end
-        if token ~= '' then
-          row[#row + 1] = {token, piece[2]}
-          used = used + vim.fn.strdisplaywidth(token)
-        end
-      end
-    end
-  end
-  if #row > 0 then rows[#rows + 1] = row end
+-- first row leaves `right` cells free at its end; later rows start one cell in.
+local function bar_rows(pieces, width, right, most)
+  local rows = Ui.wrap_pieces(pieces, width - 1, {first=width - right - 1, indent=1})
   if #rows == 0 then rows[1] = {} end
   -- Only a window too short for it leaves any of the bar unsaid.
   if #rows > most then
@@ -286,69 +262,60 @@ local function draw_bar(win, state)
   local info = vim.fn.getwininfo(win)[1]
   if info.height < 4 or info.width < 30 then close_bar(win); return end
   local pieces, right = bar_text(state, win)
-  local rows = bar_rows(pieces, info.width, vim.fn.strdisplaywidth(right), math.max(1, math.min(BAR_ROWS, info.height - 3)))
-  local place = {relative='win', win=win, row=0, col=0, width=info.width, height=#rows}
-  local shape = info.width .. ':' .. #rows
-  local bar = bars[win]
-  if bar and vim.api.nvim_win_is_valid(bar.win) then
-    if bar.shape ~= shape then vim.api.nvim_win_set_config(bar.win, place) end
-  else
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[buf].bufhidden = 'wipe'
-    place.focusable, place.style, place.zindex, place.noautocmd = false, 'minimal', 21, true
-    bar = {win=vim.api.nvim_open_win(buf, false, place), buf=buf, scrolloff=true}
-    vim.wo[bar.win].winhighlight = 'Normal:ScmReviewBar,NormalFloat:ScmReviewBar'
-    vim.wo[bar.win].wrap = false
-    bars[win] = bar
+  local rows = bar_rows(pieces, info.width, Ui.cells(right), math.max(1, math.min(BAR_ROWS, info.height - 3)))
+  -- Which lines the step covers stands at the right of the first row.
+  local first, used = rows[1], 0
+  for _, piece in ipairs(first) do used = used + Ui.cells(piece[1]) end
+  first[#first + 1] = {(' '):rep(math.max(1, info.width - Ui.cells(right) - used))}
+  first[#first + 1] = {right, 'ScmReviewBarDim'}
+  local bar = Ui.anchored(bars[win], {relative='win', win=win, row=0, col=0, width=info.width, height=#rows},
+    'ScmReviewBar', {zindex=21})
+  bars[win], bar.rows = bar, #rows
+  local drawn = signature(rows)
+  if bar.changed or bar.drawn ~= drawn then
+    bar.drawn = drawn
+    Ui.write(bar.buf, bar_ns, rows)
   end
-  bar.shape, bar.rows = shape, #rows
-  local lines, marks = {}, {}
-  for i, row in ipairs(rows) do
-    local text = ''
-    for _, piece in ipairs(row) do
-      marks[#marks + 1] = {i - 1, #text, #text + #piece[1], piece[2]}
-      text = text .. piece[1]
-    end
-    if i == 1 then
-      local before = #text + math.max(1, info.width - vim.fn.strdisplaywidth(right) - vim.fn.strdisplaywidth(text))
-      text = text .. (' '):rep(before - #text) .. right
-      marks[#marks + 1] = {0, before, #text, 'ScmReviewBarDim'}
-    end
-    lines[i] = text
+end
+
+-- As many blank rows wait above line 1 of a diff as the tallest Tour bar
+-- over it covers, and no more.
+local function fill_top(view, state)
+  local rows = state.key and 1 or 0
+  for _, win in ipairs(vim.fn.win_findbuf(view.buf)) do rows = math.max(rows, bar_height(win)) end
+  if rows == state.filler or not vim.api.nvim_buf_is_valid(view.buf) then return end
+  state.filler = rows
+  if rows == 0 or vim.api.nvim_buf_line_count(view.buf) == 0 then
+    pcall(vim.api.nvim_buf_del_extmark, view.buf, static, 1)
+    return
   end
-  local all = table.concat(lines, '\n')
-  if bar.line ~= all then
-    bar.line = all
-    vim.api.nvim_buf_set_lines(bar.buf, 0, -1, false, lines)
-    vim.api.nvim_buf_clear_namespace(bar.buf, bar_ns, 0, -1)
-    for _, mark in ipairs(marks) do
-      if mark[3] > mark[2] then
-        vim.api.nvim_buf_set_extmark(bar.buf, bar_ns, mark[1], mark[2], {end_col=mark[3], hl_group=mark[4]})
-      end
-    end
-  end
-  -- As many blank rows wait above line 1 as the tallest bar over this diff needs.
-  if #rows > (state.filler or 0) then
-    state.filler = #rows
-    local buf = vim.api.nvim_win_get_buf(win)
-    if vim.api.nvim_buf_line_count(buf) > 0 then
-      local blank = {}
-      for i = 1, #rows do blank[i] = {{'', 'Normal'}} end
-      vim.api.nvim_buf_set_extmark(buf, static, 0, 0, {id=1, virt_lines=blank, virt_lines_above=true})
-    end
-  end
+  local blank = {}
+  for i = 1, rows do blank[i] = {{'', 'Normal'}} end
+  vim.api.nvim_buf_set_extmark(view.buf, static, 0, 0, {id=1, virt_lines=blank, virt_lines_above=true})
 end
 
 -- The Tour bar covers the window's first rows, so the file's first lines
 -- are kept under it by blank rows drawn above line 1.
 local function keep_first_line(win)
   local rows = bar_height(win)
+  -- What the reader had set for this window is put back when the bar goes.
+  local bar = bars[win]
+  local buf = vim.api.nvim_win_get_buf(win)
+  if bar.scrolloff == nil then
+    local value = vim.api.nvim_get_option_value('scrolloff', {win=win, scope='local'})
+    -- A window takes the options a buffer last had in any window, so a value
+    -- set here for an earlier bar may arrive with the diff. That one is not the reader's.
+    if value == vim.b[buf].scm_review_scrolloff then value = -1 end
+    bar.scrolloff = value
+  end
   -- The cursor's line is kept out from under the bar everywhere else by
   -- never letting it be among the window's first rows.
-  local want = math.max(vim.go.scrolloff, rows)
+  local own = bar.scrolloff >= 0 and bar.scrolloff or vim.go.scrolloff
+  local want = math.max(own, rows)
   if vim.wo[win].scrolloff ~= want then
     vim.api.nvim_set_option_value('scrolloff', want, {win=win, scope='local'})
   end
+  if vim.b[buf].scm_review_scrolloff ~= want then vim.b[buf].scm_review_scrolloff = want end
   vim.api.nvim_win_call(win, function()
     local view = vim.fn.winsaveview()
     -- Only while the cursor would be under the bar: with the cursor lower, the
@@ -370,21 +337,15 @@ end
 local function close_pane(win)
   local pane = panes[win]
   panes[win] = nil
-  if not (pane and pane.win and vim.api.nvim_win_is_valid(pane.win)) then return end
-  if not pcall(vim.api.nvim_win_close, pane.win, true) then
-    vim.schedule(function() pcall(vim.api.nvim_win_close, pane.win, true) end)
-  end
+  if pane then Ui.close(pane.win) end
 end
 
 -- Take the Pane of `win` off the screen but remember which side it was on.
 local function hide_pane(win, state)
   local pane = panes[win]
   if pane and pane.win then
-    local float = pane.win
-    pane.win, pane.shape, pane.text = nil, nil, nil
-    if vim.api.nvim_win_is_valid(float) and not pcall(vim.api.nvim_win_close, float, true) then
-      vim.schedule(function() pcall(vim.api.nvim_win_close, float, true) end)
-    end
+    Ui.close(pane.win)
+    pane.win, pane.shape, pane.drawn = nil, nil, nil
   end
   if state and state.cuts and state.cuts[win] then
     state.cuts[win] = nil
@@ -409,51 +370,32 @@ local function draw_pane(win, view, state)
   if room < 3 then hide_pane(win, state); return end
   pane.where = side
   local rows, alone = Pane.rows(about, Pane.WIDTH, room - 2, narrow)
-  local lines, marks = {}, {}
+  -- Each row starts with a cell that is the amber edge of "if paused here", or blank.
+  local out = {}
   for i, pieces in ipairs(rows) do
-    local text = pieces.bar and '▌' or ' '
-    if pieces.bar then marks[#marks + 1] = {i - 1, 0, #text, 'ScmReviewPaneBar'} end
-    for _, piece in ipairs(pieces) do
-      marks[#marks + 1] = {i - 1, #text, #text + #piece[1], piece[2]}
-      text = text .. piece[1]
-    end
-    if pieces.band then marks[#marks + 1] = {i - 1, 0, #text, 'ScmReviewPaneHead', true} end
-    lines[i] = text
+    local row = {pieces.bar and {'▌', 'ScmReviewPaneBar'} or {' '}}
+    vim.list_extend(row, pieces)
+    row.line_hl = pieces.band and 'ScmReviewPaneHead' or nil
+    out[i] = row
   end
   -- A heading that stands alone in a narrow window is no wider than its words.
   local width = Pane.WIDTH
-  if alone and narrow then width = vim.fn.strdisplaywidth(lines[1]) + 1 end
+  if alone and narrow then
+    width = 1
+    for _, piece in ipairs(out[1]) do width = width + Ui.cells(piece[1]) end
+  end
   width = math.min(width, info.width - 6)
   if width < 12 then hide_pane(win, state); return end
   -- The overview strip keeps the window's last two cells.
   local col = info.width - width - 4
-  local row = side == 'home' and bar_height(win) or info.height - #lines - 2
-  local place = {relative='win', win=win, row=row, col=col, width=width, height=#lines}
-  local shape = table.concat({row, col, width, #lines}, ':')
-  if pane.win and vim.api.nvim_win_is_valid(pane.win) then
-    if pane.shape ~= shape then vim.api.nvim_win_set_config(pane.win, place) end
-  else
-    pane.buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[pane.buf].bufhidden = 'wipe'
-    place.focusable, place.style, place.zindex, place.noautocmd, place.border = false, 'minimal', 20, true, 'single'
-    pane.win = vim.api.nvim_open_win(pane.buf, false, place)
-    vim.wo[pane.win].winhighlight = 'Normal:ScmReviewPane,NormalFloat:ScmReviewPane,FloatBorder:ScmReviewPaneBorder'
-    vim.wo[pane.win].wrap = false
-    pane.text = nil
-  end
-  pane.shape = shape
-  local text = table.concat(lines, '\n')
-  if pane.text ~= text then
-    pane.text = text
-    vim.api.nvim_buf_set_lines(pane.buf, 0, -1, false, lines)
-    vim.api.nvim_buf_clear_namespace(pane.buf, pane_ns, 0, -1)
-    for _, mark in ipairs(marks) do
-      if mark[5] then
-        vim.api.nvim_buf_set_extmark(pane.buf, pane_ns, mark[1], 0, {line_hl_group=mark[4]})
-      elseif mark[3] > mark[2] then
-        vim.api.nvim_buf_set_extmark(pane.buf, pane_ns, mark[1], mark[2], {end_col=mark[3], hl_group=mark[4]})
-      end
-    end
+  local row = side == 'home' and bar_height(win) or info.height - #out - 2
+  pane = Ui.anchored(pane, {relative='win', win=win, row=row, col=col, width=width, height=#out}, 'ScmReviewPane',
+    {zindex=20, border='single'})
+  panes[win] = pane
+  local drawn = signature(out)
+  if pane.changed or pane.drawn ~= drawn then
+    pane.drawn = drawn
+    Ui.write(pane.buf, pane_ns, out)
   end
   -- A line of code that runs under the Pane is marked as cut.
   local text_col = col - info.textoff
@@ -462,7 +404,7 @@ local function draw_pane(win, view, state)
   for number = info.topline, info.botline do
     -- The Pane's rows are counted from the first row of text, under the window's own heading.
     local at_row = vim.fn.screenpos(win, number, 1).row - info.winrow - info.winbar
-    if at_row >= row and at_row <= row + #lines + 1 then
+    if at_row >= row and at_row <= row + #out + 1 then
       local code = vim.api.nvim_buf_get_lines(view.buf, number - 1, number, false)[1] or ''
       if vim.fn.strdisplaywidth(code) - leftcol > text_col - 2 then cut[#cut + 1] = number end
     end
@@ -506,6 +448,12 @@ local function paint()
   })
 end
 
+-- Whether the strip shows one row of the map: the reader's choice, or what fits.
+local function brief_map()
+  if map_brief == nil then return Strip.short() end
+  return map_brief
+end
+
 -- Bring everything around the diffs on screen up to date: the Tour bars, the
 -- Panes, and the strip under the diff the reader is in.
 function M.sync()
@@ -516,6 +464,7 @@ function M.sync()
   for win in pairs(panes) do
     if not (vim.api.nvim_win_is_valid(win) and lookup(vim.api.nvim_win_get_buf(win))) then close_pane(win) end
   end
+  local seen = {}
   for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     -- Drawing one bar may close another window in this list.
     local view = vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative == ''
@@ -527,8 +476,17 @@ function M.sync()
         if at then state.steps[win], state.visited[at] = at, true end
       end
       draw_bar(win, state)
+      seen[view] = state
+    end
+  end
+  -- Line 1 is kept under the bars once every bar over the diff is known.
+  for view, state in pairs(seen) do fill_top(view, state) end
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local view = vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_config(win).relative == ''
+      and lookup(vim.api.nvim_win_get_buf(win))
+    if view and seen[view] then
       if bars[win] then keep_first_line(win) end
-      draw_pane(win, view, state)
+      draw_pane(win, view, seen[view])
     end
   end
   -- The strip stays under the diff the reader was last in while they look
@@ -547,8 +505,7 @@ function M.sync()
   end
   if not state.data then Strip.show(nil, nil); return end
   local flow, number, at = flow_here(view, state, win)
-  local brief = map_brief
-  if brief == nil then brief = Strip.short() end
+  local brief = brief_map()
   Strip.show(win, {
     key=table.concat({view.buf, view.revision, state.generation or 0, at or 0, number or 0, tostring(shown), vim.api.nvim_win_get_width(win),
       flow and flow.from or 0}, ':'),
@@ -583,6 +540,16 @@ local function refresh_windows(view)
   M.sync()
 end
 
+-- Stop asking for the Review of `state`, if it is being asked for.
+local function stop_asking(state)
+  if state.cancel then state.cancel(); state.cancel = nil end
+  if state.timer then
+    if not state.timer:is_closing() then state.timer:close() end
+    state.timer = nil
+  end
+  if state.status == 'asking' then state.status = 'none' end
+end
+
 -- Ask the Explainer in use for a Review of the diff in `view`. `again` asks
 -- even when a Review is kept.
 function M.explain(view, again)
@@ -592,32 +559,49 @@ function M.explain(view, again)
   local question = numbered(view)
   if not (service and question) then return false end
   local key = state.key
-  if again then Prompt.forget(key) end
+  if again then
+    Prompt.forget(key)
+    answers[key] = nil
+  end
   state.status, state.started, state.error = 'asking', vim.uv.now(), nil
+  -- The bar counts the seconds while the Explainer reads.
   local timer = vim.uv.new_timer()
+  state.timer = timer
   timer:start(1000, 1000, vim.schedule_wrap(function()
-    if state.status ~= 'asking' or state.key ~= key then
+    if state.timer ~= timer or view.review ~= state or state.status ~= 'asking' or state.key ~= key then
       if not timer:is_closing() then timer:close() end
+      if state.timer == timer then state.timer = nil end
       return
     end
     M.sync()
   end))
   M.sync()
-  state.cancel = Explainers.ask(service, Prompt.build(view.spec.path, question, service.kind == 'claude_code', service.style),
-    {cwd=view.spec.repo}, function(err, answer)
-      state.cancel = nil
-      if not timer:is_closing() then timer:close() end
-      -- The file changed, or was closed, while the Explainer was reading it.
-      if state.key ~= key or view.review ~= state then return end
-      local raw, why = nil, err
-      if not err then raw, why = Schema.decode(answer) end
-      if not raw then
-        state.status, state.error = 'failed', why
-      elseif take(view, state, raw) then
-        Prompt.keep(key, raw)
-      end
-      if vim.api.nvim_buf_is_valid(view.buf) then refresh_windows(view) end
-    end)
+  local ok, cancel = pcall(function()
+    return Explainers.ask(service, Prompt.build(view.spec.path, question, service.kind == 'claude_code', service.style),
+      {cwd=view.spec.repo}, function(err, answer)
+        state.cancel = nil
+        if state.timer == timer then state.timer = nil end
+        if not timer:is_closing() then timer:close() end
+        -- The file changed, or was closed, while the Explainer was reading it.
+        if state.key ~= key or view.review ~= state then return end
+        local raw, why = nil, err
+        if not err then raw, why = Schema.decode(answer) end
+        if not raw then
+          state.status, state.error = 'failed', why
+        elseif take(view, state, raw) then
+          Prompt.keep(key, raw)
+        end
+        if vim.api.nvim_buf_is_valid(view.buf) then refresh_windows(view) end
+      end)
+  end)
+  if not ok then
+    -- A service set up wrongly fails here, and the bar says so: it never waits for an answer that cannot come.
+    stop_asking(state)
+    state.status, state.error = 'failed', tostring(cancel):gsub('^.-:%d+: ', '')
+    M.sync()
+    return false
+  end
+  state.cancel = cancel
   return true
 end
 
@@ -630,7 +614,8 @@ function M.attach(view)
   local key = readable and Prompt.key(view.spec.path, view.old, view.new, service and service.style) or nil
   if key ~= state.key or not key then
     -- An Explainer still reading the text this replaces is stopped: its answer would not be used.
-    if state.cancel then state.cancel(); state.cancel = nil end
+    stop_asking(state)
+    if state.key then answers[state.key] = nil end
     state.key, state.data, state.steps, state.visited, state.cuts = key, nil, {}, {}, nil
     state.status, state.error = key and 'none' or 'nothing', nil
     local kept = key and Prompt.kept(key)
@@ -639,10 +624,7 @@ function M.attach(view)
   -- The blank row that keeps line 1 out from under the Tour bar.
   vim.api.nvim_buf_clear_namespace(view.buf, static, 0, -1)
   state.filler = 0
-  if key and vim.api.nvim_buf_line_count(view.buf) > 0 then
-    state.filler = 1
-    vim.api.nvim_buf_set_extmark(view.buf, static, 0, 0, {id=1, virt_lines={{{'', 'Normal'}}}, virt_lines_above=true})
-  end
+  fill_top(view, state)
   -- Lines already on screen are painted again, now with the Review's marks.
   for _, win in ipairs(vim.fn.win_findbuf(view.buf)) do redraw(win) end
   M.sync()
@@ -650,7 +632,10 @@ end
 
 function M.detach(view)
   local state = view.review
-  if state and state.cancel then state.cancel() end
+  if state then
+    stop_asking(state)
+    if state.key then answers[state.key] = nil end
+  end
   view.review = nil
   vim.schedule(M.sync)
 end
@@ -706,33 +691,34 @@ function M.map()
     vim.api.nvim_echo({{'How this line gets run: ' .. where, 'ScmReviewDim'}}, false, {})
     return
   end
-  local brief = map_brief
-  if brief == nil then brief = Strip.short() end
-  map_brief = not brief
+  map_brief = not brief_map()
   M.sync()
+end
+
+-- Put `lines` in float `win`, wrapped to its width, and make it as tall as they need.
+local function fill(win, buf, lines)
+  local width = vim.api.nvim_win_get_width(win)
+  local wrapped = {}
+  for _, line in ipairs(lines) do
+    if line == '' then wrapped[#wrapped + 1] = '' end
+    for _, part in ipairs(Ui.wrap(line, width - 4)) do wrapped[#wrapped + 1] = '  ' .. part end
+  end
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, wrapped)
+  vim.bo[buf].modifiable = false
+  local height = math.max(1, math.min(#wrapped, vim.o.lines - 6))
+  vim.api.nvim_win_set_config(win, {relative='editor', width=width, height=height,
+    row=math.max(0, math.floor((vim.o.lines - height) / 2) - 1), col=math.max(0, math.floor((vim.o.columns - width) / 2))})
 end
 
 -- A small window in the middle of the editor holding `lines`.
 local function float(title, lines)
-  local width = math.min(76, vim.o.columns - 8)
-  local wrapped = {}
-  for _, line in ipairs(lines) do
-    if line == '' then wrapped[#wrapped + 1] = '' end
-    for _, part in ipairs(Pane.wrap(line, width - 4)) do wrapped[#wrapped + 1] = '  ' .. part end
-  end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = 'wipe'
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, wrapped)
-  vim.bo[buf].modifiable = false
-  local height = math.min(#wrapped, vim.o.lines - 6)
-  local win = vim.api.nvim_open_win(buf, true, {relative='editor', width=width, height=math.max(1, height),
-    row=math.floor((vim.o.lines - height) / 2) - 1, col=math.floor((vim.o.columns - width) / 2),
-    style='minimal', border='rounded', title=' ' .. title .. ' ', title_pos='left'})
-  vim.wo[win].winhighlight = 'Normal:ScmReviewFloat,FloatBorder:ScmReviewFloat,FloatTitle:ScmReviewFloatTitle'
+  local win = Ui.centered(buf, {title=title, width=math.max(20, math.min(76, vim.o.columns - 8)), height=1,
+    keys={'<CR>'}})
   vim.wo[win].wrap = true
-  for _, key in ipairs({'q', '<Esc>', '<CR>'}) do
-    vim.keymap.set('n', key, function() pcall(vim.api.nvim_win_close, win, true) end, {buffer=buf, nowait=true})
-  end
+  fill(win, buf, lines)
   return win, buf
 end
 
@@ -749,7 +735,6 @@ function M.ask(question)
   local text = vim.api.nvim_buf_get_lines(view.buf, row - 1, row, false)[1] or ''
   local number = line.new or line.old or row
   local title = ('Line %d · %s'):format(number, service.name)
-  local cache = table.concat({state.key, row, question or '', service.style or ''}, ':')
   -- A longer explanation starts with what the Review already says, which the Pane may have had no room for.
   local known = {}
   if not question and state.data then
@@ -758,17 +743,41 @@ function M.ask(question)
     if #known > 0 then known[#known + 1] = '' end
   end
   local function with_known(lines) return vim.list_extend(vim.list_extend({}, known), lines) end
-  if answers[cache] then float(title, with_known(vim.split(answers[cache], '\n'))); return end
+  local slot = answers[state.key] or {}
+  answers[state.key] = slot
+  local asked = table.concat({row, question or '', service.name, service.style or ''}, ':')
+  if slot[asked] then float(title, with_known(vim.split(slot[asked], '\n'))); return end
+  -- The same question asked again while it is being answered goes back to the window waiting for it.
+  local id = state.key .. ':' .. asked
+  local pending = waiting[id]
+  if pending and vim.api.nvim_win_is_valid(pending.win) then vim.api.nvim_set_current_win(pending.win); return end
   local prompt = question and Prompt.question(view.spec.path, context, number, text, question, service.style)
     or Prompt.more(view.spec.path, context, number, text, service.style)
-  local waiting, buf = float(title, with_known({service.name .. ' is thinking…'}))
-  Explainers.ask(service, prompt, {cwd=view.spec.repo}, function(err, answer)
+  local waiting_win, buf = float(title, with_known({service.name .. ' is thinking…'}))
+  local entry = {win=waiting_win}
+  waiting[id] = entry
+  local ok, cancel = pcall(Explainers.ask, service, prompt, {cwd=view.spec.repo}, function(err, answer)
+    if waiting[id] == entry then waiting[id] = nil end
     local lines = err and {'Could not answer: ' .. err} or vim.split(vim.trim(answer or ''), '\n')
-    if not err then answers[cache] = table.concat(lines, '\n') end
-    if not (vim.api.nvim_win_is_valid(waiting) and vim.api.nvim_win_get_buf(waiting) == buf) then return end
-    pcall(vim.api.nvim_win_close, waiting, true)
-    float(title, with_known(lines))
+    if not err then slot[asked] = table.concat(lines, '\n') end
+    -- The answer goes into the window that waited for it, without moving the cursor.
+    if vim.api.nvim_win_is_valid(waiting_win) and vim.api.nvim_win_get_buf(waiting_win) == buf then
+      fill(waiting_win, buf, with_known(lines))
+    end
   end)
+  if not ok then
+    waiting[id] = nil
+    fill(waiting_win, buf, with_known({'Could not answer: ' .. tostring(cancel):gsub('^.-:%d+: ', '')}))
+    return
+  end
+  entry.cancel = cancel
+  -- Closing the window before the answer comes takes the question back.
+  vim.api.nvim_create_autocmd('BufWipeout', {buffer=buf, once=true, callback=function()
+    if waiting[id] == entry then
+      waiting[id] = nil
+      cancel()
+    end
+  end})
 end
 
 -- Type a question about the line under the cursor.
@@ -840,13 +849,15 @@ function M.setup(opts, find)
     -- Take away what an earlier setup put on screen and bound.
     for win in pairs(bars) do close_bar(win) end
     for win in pairs(panes) do close_pane(win) end
+    for _, entry in pairs(waiting) do entry.cancel() end
+    waiting, answers = {}, {}
     Strip.close()
     pcall(vim.api.nvim_del_augroup_by_name, 'ScmReview')
     pcall(vim.api.nvim_del_user_command, 'ScmExplainers')
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
       local view = vim.api.nvim_buf_is_valid(buf) and find(buf)
       if view then
-        if view.review and view.review.cancel then view.review.cancel() end
+        if view.review then stop_asking(view.review) end
         view.review = nil
         vim.api.nvim_buf_clear_namespace(buf, static, 0, -1)
         for _, key in ipairs(BOUND) do pcall(vim.keymap.del, 'n', key, {buffer=buf}) end

@@ -3,6 +3,8 @@
 -- run on this machine, is the one SCM starts with; any other service can be
 -- added. A key is never kept here: a service names the environment variable
 -- that holds it, or a command that prints it.
+local Files = require('scm.files')
+local Process = require('scm.process')
 local M = {}
 
 -- The kinds of service, and what each needs to be told.
@@ -27,8 +29,10 @@ M.FIELD_HELP = {
 local DEFAULT = {name='Claude Code', kind='claude_code', command='claude'}
 -- How long an Explainer may take to answer, in milliseconds.
 M.TIMEOUT = 300000
+-- The most an Explainer's answer may hold, in bytes.
+M.MAX_ANSWER = 4 * 1024 * 1024
 
-local state  -- {active = name, services = {...}}, read once
+local state  -- {active = name, chosen = name, services = {...}}, read once
 local configured  -- what setup() was given
 
 local function path()
@@ -36,23 +40,51 @@ local function path()
 end
 
 local function valid(service)
-  return type(service) == 'table' and type(service.name) == 'string' and service.name ~= ''
-    and M.KINDS[service.kind] ~= nil
+  if not (type(service) == 'table' and type(service.name) == 'string' and service.name ~= ''
+    and M.KINDS[service.kind] ~= nil) then
+    return false
+  end
+  -- Every field a service is told is a line of text.
+  for _, field in ipairs(M.KINDS[service.kind].fields) do
+    if service[field] ~= nil and type(service[field]) ~= 'string' then return false end
+  end
+  return true
+end
+
+-- Whether a key may be sent to `url`: over https anywhere, or over plain
+-- http only to this machine. Returns true, or nil and why.
+function M.safe_url(url)
+  if type(url) ~= 'string' then return true end
+  local scheme, rest = url:match('^(%a[%w+.-]*)://(.*)$')
+  scheme = scheme and scheme:lower()
+  if scheme == 'https' then return true end
+  local host = rest and (rest:match('^%[([^%]]*)%]') or rest:match('^([^/:?#]*)'))
+  host = host and host:lower()
+  if scheme == 'http' and (host == 'localhost' or host == '::1' or (host and host:match('^127%.%d+%.%d+%.%d+$'))) then
+    return true
+  end
+  return nil, 'the address must start with https:// (plain http:// is only for this machine)'
+end
+
+-- A command line of the user's run by their shell. The shell's flag may be
+-- more than one word, as PowerShell's is.
+local function shell(command)
+  local argv = {vim.o.shell}
+  vim.list_extend(argv, vim.split(vim.o.shellcmdflag, '%s+', {trimempty=true}))
+  argv[#argv + 1] = command
+  return argv
 end
 
 local function load()
   if state then return state end
   state = {services={}}
-  local file = io.open(path(), 'r')
-  if file then
-    local ok, saved = pcall(vim.json.decode, file:read('*a'))
-    file:close()
-    if ok and type(saved) == 'table' then
-      for _, service in ipairs(type(saved.services) == 'table' and saved.services or {}) do
-        if valid(service) then state.services[#state.services + 1] = service end
-      end
-      state.active = type(saved.active) == 'string' and saved.active or nil
+  local saved = Files.read(path())
+  if type(saved) == 'table' then
+    for _, service in ipairs(type(saved.services) == 'table' and saved.services or {}) do
+      if valid(service) then state.services[#state.services + 1] = service end
     end
+    -- Only a service the reader chose on the admin page is kept as chosen.
+    state.chosen = type(saved.active) == 'string' and saved.active or nil
   end
   -- Services named in setup() come first and cannot be changed from the admin page.
   local seen = {}
@@ -71,7 +103,7 @@ local function load()
   end
   if not seen[DEFAULT.name] then table.insert(merged, 1, vim.deepcopy(DEFAULT)) end
   state.services = merged
-  state.active = state.active or (configured and configured.use) or DEFAULT.name
+  state.active = state.chosen or (configured and configured.use) or DEFAULT.name
   if not M.get(state.active) then state.active = merged[1].name end
   return state
 end
@@ -81,10 +113,9 @@ local function save()
   for _, service in ipairs(state.services) do
     if not service.fixed then keep[#keep + 1] = service end
   end
-  vim.fn.mkdir(vim.fs.dirname(path()), 'p')
-  local file = assert(io.open(path(), 'w'))
-  file:write(vim.json.encode({active=state.active, services=keep}))
-  file:close()
+  -- The service named in the configuration holds until the reader chooses
+  -- another, so only a choice made on the admin page is written down.
+  assert(Files.write(path(), {active=state.chosen, services=keep}))
 end
 
 -- Take the Explainers named in setup(): {use = name, services = {...}}.
@@ -105,14 +136,14 @@ function M.active() return M.get(load().active) end
 
 function M.use(name)
   if not M.get(name) then return false end
-  state.active = name
+  state.active, state.chosen = name, name
   save()
   return true
 end
 
 -- Add a service, or change the one of that name. Returns nil and why when it cannot be.
 function M.put(service)
-  if not valid(service) then return nil, 'a service needs a name and a kind' end
+  if not valid(service) then return nil, 'a service needs a name and a kind, and its fields are text' end
   local known = M.get(service.name)
   if known and known.fixed then return nil, 'this service is set in your Neovim configuration' end
   local kept = {name=service.name, kind=service.kind}
@@ -125,6 +156,10 @@ function M.put(service)
   if program and vim.fn.executable(program) ~= 1 then
     return nil, ('there is no program named "%s". The command is the program to run; how to explain goes in "style"')
       :format(program)
+  end
+  if kept.url then
+    local ok, why = M.safe_url(kept.url)
+    if not ok then return nil, why end
   end
   if known then
     for i, other in ipairs(state.services) do
@@ -145,45 +180,51 @@ function M.remove(name)
   for i, other in ipairs(state.services) do
     if other.name == name then table.remove(state.services, i); break end
   end
+  if state.chosen == name then state.chosen = nil end
+  local was = state.active
   if state.active == name then state.active = state.services[1].name end
   save()
-  return true
+  return true, was ~= state.active
 end
 
 -- The key a service uses, or nil and why there is none.
 local function key_of(service, cb)
-  local from_env = service.key_env and vim.env[service.key_env]
+  local key_env = service.key_env or M.KINDS[service.kind].defaults.key_env
+  local from_env = key_env and vim.env[key_env]
   if from_env and from_env ~= '' then cb((vim.trim(from_env):match('^[^\r\n]*'))); return end
   if not service.key_cmd then
-    cb(nil, service.key_env and ('the environment variable ' .. service.key_env .. ' is not set') or nil)
+    cb(nil, key_env and ('the environment variable ' .. key_env .. ' is not set') or nil)
     return
   end
-  vim.system({vim.o.shell, vim.o.shellcmdflag, service.key_cmd}, {text=true, timeout=15000}, function(out)
-    vim.schedule(function()
-      -- A key is one line: a password manager may print notes after it.
-      local key = out.code == 0 and vim.trim((vim.trim(out.stdout or ''):match('^[^\r\n]*') or '')) or ''
-      if key == '' then cb(nil, 'the key command printed no key') else cb(key) end
-    end)
+  local started = Process.run(shell(service.key_cmd), {text=true, timeout=15000, max_bytes=64 * 1024}, function(out)
+    -- A key is one line: a password manager may print notes after it.
+    local key = out.code == 0 and vim.trim((vim.trim(out.stdout):match('^[^\r\n]*') or '')) or ''
+    if key == '' then cb(nil, 'the key command printed no key') else cb(key) end
   end)
+  if not started then vim.schedule(function() cb(nil, 'the key command could not be started') end) end
 end
 
+-- What a program said, on one line of at most 300 characters.
 local function shorten(text)
   text = vim.trim((text or ''):gsub('%s+', ' '))
-  return #text > 300 and (text:sub(1, 300) .. '…') or text
+  if vim.fn.strchars(text) > 300 then text = vim.fn.strcharpart(text, 0, 300) .. '…' end
+  return text
 end
 
--- Run `argv` with `input` on its standard input; cb(err, stdout).
-local function run(argv, input, cwd, cb)
-  local ok, process = pcall(vim.system, argv, {text=true, stdin=input, cwd=cwd, timeout=M.TIMEOUT}, function(out)
-    vim.schedule(function()
+-- Run `argv` with `input` on its standard input; cb(err, stdout). When it
+-- fails, what it printed comes too, for a caller that can read it better.
+local function run(argv, input, opts, cb)
+  local process = Process.run(argv, {text=true, stdin=input, cwd=opts.cwd, env=opts.env, timeout=M.TIMEOUT,
+    max_bytes=M.MAX_ANSWER}, function(out)
       if out.code == 124 or out.signal == 15 and out.code ~= 0 then cb('it took too long to answer')
-      elseif out.code ~= 0 then cb(shorten(out.stderr ~= '' and out.stderr or out.stdout) or ('exit ' .. out.code))
-      else cb(nil, out.stdout or '') end
+      elseif out.too_large then cb('its answer was too long')
+      elseif out.code ~= 0 then
+        local said = shorten(out.stderr ~= '' and out.stderr or out.stdout)
+        cb(said ~= '' and said or ('it stopped with exit code ' .. out.code), out.stdout)
+      else cb(nil, out.stdout) end
     end)
-  end)
-  if not ok then
+  if not process then
     vim.schedule(function() cb('could not start ' .. argv[1] .. ': is it installed?') end)
-    return nil
   end
   return process
 end
@@ -192,6 +233,8 @@ end
 -- through curl's standard input and the body through a file only this user
 -- can read, so neither shows in the list of running programs.
 local function post(url, headers, body, cb)
+  local safe, why = M.safe_url(url)
+  if not safe then vim.schedule(function() cb(why) end); return nil end
   local file = vim.fn.tempname()
   local handle = assert(io.open(file, 'w'))
   handle:write(vim.json.encode(body))
@@ -201,14 +244,16 @@ local function post(url, headers, body, cb)
   local function quoted(value)
     return '"' .. value:gsub('%c', ''):gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
   end
-  local config = {'url = ' .. quoted(url), 'silent', 'show-error', 'data-binary = ' .. quoted('@' .. file),
-    'header = "content-type: application/json"'}
+  -- Only the protocols checked above are spoken, and a redirect is not followed.
+  local config = {'url = ' .. quoted(url), 'silent', 'show-error', 'proto = "=https,http"',
+    'data-binary = ' .. quoted('@' .. file), 'header = "content-type: application/json"'}
   for _, header in ipairs(headers) do config[#config + 1] = 'header = ' .. quoted(header) end
-  return run({'curl', '--config', '-'}, table.concat(config, '\n') .. '\n', nil, function(err, out)
+  -- -q comes first: curl reads no ~/.curlrc, which could send the key elsewhere.
+  return run({'curl', '-q', '--config', '-'}, table.concat(config, '\n') .. '\n', {}, function(err, out)
     vim.uv.fs_unlink(file)
     if err then cb(err); return end
-    local ok, reply = pcall(vim.json.decode, out, {luanil={object=true, array=true}})
-    if not ok or type(reply) ~= 'table' then cb('the service did not answer in JSON: ' .. shorten(out)); return end
+    local reply = Files.decode(out)
+    if type(reply) ~= 'table' then cb('the service did not answer in JSON: ' .. shorten(out)); return end
     if reply.error then
       local message = type(reply.error) == 'table' and reply.error.message or reply.error
       cb(shorten(tostring(message)))
@@ -225,16 +270,25 @@ local ASK = {}
 -- Claude Code reads the repository itself, with tools that only read.
 function ASK.claude_code(service, prompt, opts, cb, job)
   local argv = vim.split(service.command or 'claude', '%s+', {trimempty=true})
+  -- The program is found where the editor finds it, never in the repository
+  -- it is run in.
+  argv[1] = vim.fn.exepath(argv[1]) ~= '' and vim.fn.exepath(argv[1]) or argv[1]
   -- The repository being read may not be the reader's own, so nothing in it
-  -- configures Claude Code: its settings, with any hooks, and its MCP
-  -- servers are left out, and the only tools are ones that read.
+  -- configures Claude Code or reaches past it. --restricted keeps the file
+  -- tools inside the repository and reads no settings files; --safe-mode
+  -- leaves out CLAUDE.md, skills, hooks, plugins and custom agents; there
+  -- are no MCP servers, and the only tools are ones that read.
   vim.list_extend(argv, {'-p', '--output-format', 'json', '--tools', 'Read,Grep,Glob', '--no-session-persistence',
-    '--setting-sources', 'user', '--strict-mcp-config'})
+    '--restricted', '--safe-mode', '--setting-sources', 'user', '--strict-mcp-config'})
   if service.model then vim.list_extend(argv, {'--model', service.model}) end
-  job.process = run(argv, prompt, opts.cwd, function(err, out)
-    if err then cb(err); return end
-    local ok, reply = pcall(vim.json.decode, out, {luanil={object=true, array=true}})
-    if not ok or type(reply) ~= 'table' then cb(nil, out); return end
+  job.process = run(argv, prompt, {cwd=opts.cwd}, function(err, out)
+    local reply = Files.decode(out)
+    -- Claude Code reports a failure, such as a spending limit, in the JSON it prints.
+    if err then
+      cb(type(reply) == 'table' and type(reply.result) == 'string' and shorten(reply.result) or err)
+      return
+    end
+    if type(reply) ~= 'table' then cb(nil, out); return end
     if reply.is_error then cb(shorten(tostring(reply.result or 'Claude Code reported an error'))); return end
     cb(nil, type(reply.result) == 'string' and reply.result or out)
   end)
@@ -280,7 +334,11 @@ end
 
 function ASK.command(service, prompt, opts, cb, job)
   if not service.command then cb('this service needs a command'); return end
-  job.process = run({vim.o.shell, vim.o.shellcmdflag, service.command}, prompt, opts.cwd, cb)
+  -- The command is run outside the repository, which may not be the reader's
+  -- own: a tool that reads settings from where it runs finds none of the
+  -- repository's. It is told where the repository is instead.
+  job.process = run(shell(service.command), prompt,
+    {cwd=vim.fn.stdpath('cache'), env=opts.cwd and {SCM_REPO=opts.cwd} or nil}, cb)
 end
 
 -- Ask `service` the question in `prompt`. `opts.cwd` is the repository the
@@ -291,8 +349,12 @@ function M.ask(service, prompt, opts, cb)
   local ask = service and ASK[service.kind]
   if not ask then vim.schedule(function() cb('no such service') end); return function() end end
   local job = {}
+  -- The answer always comes later, never before this returns, even when a
+  -- service is set up wrongly and fails at once.
   ask(service, prompt, opts or {}, function(err, answer)
-    if not job.cancelled then cb(err, answer) end
+    vim.schedule(function()
+      if not job.cancelled then cb(err, answer) end
+    end)
   end, job)
   return function()
     job.cancelled = true

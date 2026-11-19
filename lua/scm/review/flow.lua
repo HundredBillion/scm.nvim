@@ -66,10 +66,15 @@ function M.caption(flow, file)
   return table.concat(parts, ' · ')
 end
 
-local function lane_title(flow, lane)
+-- The heading of lane `lane` of `flow`, in capitals.
+function M.lane_title(flow, lane)
   if lane == 3 then return (flow.outside or 'Outside this program'):upper() end
   return M.LANES[lane]:upper()
 end
+
+-- When the program runs the "later" lane, and what hands work to it.
+function M.later(flow) return flow.later or 'when the program is free' end
+function M.handoff(flow) return flow.handoff or 'runs it later' end
 
 -- The map drawn with characters, for a terminal that cannot show a picture:
 -- a staircase, one step a row, each a list of {text, highlight} pieces.
@@ -89,12 +94,12 @@ function M.text(flow, line)
       if step.lane == 2 and lane == 1 then
         -- The program takes over: the path leaves the staircase and starts again.
         row({'╭' .. ('╌'):rep(math.max(2, depth * 2 + 3)) .. '╯  ', 'ScmReviewLater'},
-          {'later · ' .. (flow.later or 'when the program is free'), 'ScmReviewLater'})
+          {'later · ' .. M.later(flow), 'ScmReviewLater'})
         depth = 0
       else
         local rule = step.lane == 3 and '┯━ ' or '┬─ '
         local fill = step.lane == 3 and '━' or '─'
-        local title = lane_title(flow, step.lane)
+        local title = M.lane_title(flow, step.lane)
         row({rule, 'ScmReviewRule'}, {title .. ' ', 'ScmReviewLane'},
           {fill:rep(math.max(3, 40 - vim.fn.strchars(title))), 'ScmReviewRule'})
         depth = 0

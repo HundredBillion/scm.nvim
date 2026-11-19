@@ -15,52 +15,24 @@ M.MAX_PROSE = 6
 -- The Pane changes sides for more room only when the other side has this many rows more.
 local WORTH_MOVING = 3
 
-local function cells(text) return vim.fn.strdisplaywidth(text) end
+local Ui = require('scm.ui')
+local cells = Ui.cells
 
 -- Cut a row of {text, highlight} pieces to `width` cells.
 local function fit(pieces, width)
   local out, used = {}, 0
   for _, piece in ipairs(pieces) do
-    local text = piece[1]
     local room = width - used
     if room <= 0 then break end
-    if cells(text) > room then
-      text = vim.fn.strcharpart(text, 0, math.max(0, room - 1))
-      while cells(text) > room - 1 do text = vim.fn.strcharpart(text, 0, vim.fn.strchars(text) - 1) end
-      text = text .. '…'
-    end
+    local text = Ui.truncate(piece[1], room)
     out[#out + 1] = {text, piece[2]}
     used = used + cells(text)
   end
   return out
 end
 
--- Break `text` into lines no wider than `width`, at spaces. A word wider
--- than a whole line is broken where the line ends.
-function M.wrap(text, width)
-  local lines, line = {}, ''
-  local words = {}
-  for word in text:gmatch('%S+') do
-    while cells(word) > width do
-      local part = vim.fn.strcharpart(word, 0, width)
-      while cells(part) > width do part = vim.fn.strcharpart(part, 0, vim.fn.strchars(part) - 1) end
-      if part == '' then break end
-      words[#words + 1] = part
-      word = vim.fn.strcharpart(word, vim.fn.strchars(part))
-    end
-    words[#words + 1] = word
-  end
-  for _, word in ipairs(words) do
-    if line ~= '' and cells(line) + 1 + cells(word) > width then
-      lines[#lines + 1] = line
-      line = word
-    else
-      line = line == '' and word or (line .. ' ' .. word)
-    end
-  end
-  if line ~= '' then lines[#lines + 1] = line end
-  return lines
-end
+-- Break `text` into lines no wider than `width`, at spaces.
+M.wrap = Ui.wrap
 
 -- A line of prose as pieces, with each of `names` standing out.
 local function prose(line, names, base, strong)

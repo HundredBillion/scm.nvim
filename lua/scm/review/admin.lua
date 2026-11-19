@@ -121,8 +121,11 @@ end
 function M.remove()
   local service = selected()
   if not service then return end
-  local ok, why = Explainers.remove(service.name)
-  if ok then say(('Removed "%s".'):format(service.name)) else say(why or 'There is no such service.', true) end
+  local ok, moved = Explainers.remove(service.name)
+  if not ok then say(moved or 'There is no such service.', true); return end
+  say(('Removed "%s".'):format(service.name))
+  -- Open diffs were explained by the service just removed.
+  if moved then require('scm.review').restyle() end
 end
 
 function M.use()
@@ -152,15 +155,11 @@ function M.open(closed)
   end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = 'wipe'
-  local width = math.min(92, vim.o.columns - 6)
-  local win = vim.api.nvim_open_win(buf, true, {relative='editor', width=width, height=12,
-    row=math.max(1, math.floor(vim.o.lines / 2) - 9), col=math.floor((vim.o.columns - width) / 2),
-    style='minimal', border='rounded', title=' SCM · Explainers ', title_pos='left'})
-  vim.wo[win].winhighlight = 'Normal:ScmReviewFloat,FloatBorder:ScmReviewFloat,FloatTitle:ScmReviewFloatTitle'
+  local win = require('scm.ui').centered(buf, {title='SCM · Explainers', width=math.max(20, math.min(92, vim.o.columns - 6)),
+    height=12, row=math.max(1, math.floor(vim.o.lines / 2) - 9)})
   vim.wo[win].cursorline = true
   page = {win=win, buf=buf, rows={}}
-  local function close() pcall(vim.api.nvim_win_close, win, true) end
-  for key, run in pairs({['<CR>']=M.use, a=M.add, e=M.edit, d=M.remove, t=M.test, q=close, ['<Esc>']=close}) do
+  for key, run in pairs({['<CR>']=M.use, a=M.add, e=M.edit, d=M.remove, t=M.test}) do
     vim.keymap.set('n', key, run, {buffer=buf, nowait=true})
   end
   vim.api.nvim_create_autocmd('BufWipeout', {buffer=buf, once=true, callback=function()

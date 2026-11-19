@@ -94,14 +94,12 @@ function M.svg(flow, opts)
   -- Where each lane and its cards sit.
   local x = SIDE
   for at, lane in ipairs(lanes) do
-    local label = Flow.LANES[lane.lane]:upper()
+    local label = Flow.lane_title(flow, lane.lane)
     local sub, keys
     if lane.lane == 1 then
       sub, keys = flow.trigger.says and ('· ' .. flow.trigger.says), flow.trigger.keys
     elseif lane.lane == 2 then
-      sub = '· ' .. (flow.later or 'when the program is free')
-    else
-      label = (flow.outside or 'Outside this program'):upper()
+      sub = '· ' .. Flow.later(flow)
     end
     lane.label, lane.sub, lane.keys = label, sub, keys
     local label_w = width(label, 11.5) * 1.26 + (sub and width(sub, 12.4) + 6 or 0)
@@ -109,7 +107,7 @@ function M.svg(flow, opts)
     if at > 1 then
       local edge = leaving[lane.cards[1].index - 1]
       lane.handoff = edge and edge.kind == 'later'
-      x = x + (lane.handoff and (width(flow.handoff or 'runs it later', 11.8) + 34) or LANE_GAP)
+      x = x + (lane.handoff and (width(Flow.handoff(flow), 11.8) + 34) or LANE_GAP)
     end
     lane.x = x
     local loop
@@ -254,7 +252,7 @@ function M.svg(flow, opts)
     -- A path stops a little short of the card the reader is on, so its
     -- colour never touches the blue.
     local stop = edge.to == here_at and 3 or 0
-    local label = later and (flow.handoff or 'runs it later') or pending and 'not yet called' or 'calls'
+    local label = later and Flow.handoff(flow) or pending and 'not yet called' or 'calls'
     if a.lane == b.lane and a.row == b.row then
       local y = a.y + CARD_H / 2
       path({a.x + a.w, y, b.x - 8 - stop, y}, color, stroke_width, dash)

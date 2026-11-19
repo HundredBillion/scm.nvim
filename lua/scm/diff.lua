@@ -6,6 +6,8 @@ local M = {}
 local ns = vim.api.nvim_create_namespace('scm.diff')
 local text_diff = vim.text and vim.text.diff or vim.diff
 local Review = require('scm.review')
+local Ui = require('scm.ui')
+local Process = require('scm.process')
 
 -- What each Change Group compares, as the header names it.
 local SOURCES = {changes='diff', staged='staged diff', committed='branch diff'}
@@ -120,22 +122,10 @@ function M.emphasis(old, new)
   return old_ranges, new_ranges
 end
 
--- Mix `alpha` of colour `top` over `bottom`, as a translucent layer would.
-local function mix(top, bottom, alpha)
-  local out = 0
-  for shift = 16, 0, -8 do
-    local t, b = bit.band(bit.rshift(top, shift), 255), bit.band(bit.rshift(bottom, shift), 255)
-    out = out + bit.lshift(math.floor(t * alpha + b * (1 - alpha) + 0.5), shift)
-  end
-  return out
-end
-
 -- VS Code's diff colours are translucent layers over the editor background;
 -- a terminal cell has one colour, so each is mixed here.
 function M.highlights()
-  local function color(name, key, fallback)
-    return vim.api.nvim_get_hl(0, {name=name, link=false})[key] or fallback
-  end
+  local mix, color = Ui.mix, Ui.color
   local dark = vim.o.background == 'dark'
   local background = color('Normal', 'bg', dark and 0x1e1e1e or 0xffffff)
   local number = color('LineNr', 'fg', dark and 0x858585 or 0x237893)
@@ -183,7 +173,7 @@ function M.header()
   -- While a window's gutter or header is drawn, that window is the current one.
   local view = views[vim.api.nvim_get_current_buf()]
   if not view then return '' end
-  local function escape(text) return (text:gsub('%%', '%%%%')) end
+  local escape = Ui.escape
   local counts = ''
   if view.stats and view.stats.added + view.stats.removed > 0 then
     counts = '%#ScmDiffAddSign# +' .. view.stats.added .. ' %#ScmDiffDeleteSign# -' .. view.stats.removed .. ' '
@@ -251,11 +241,7 @@ end
 local function close_ruler(win)
   local ruler = rulers[win]
   rulers[win] = nil
-  if not (ruler and vim.api.nvim_win_is_valid(ruler.win)) then return end
-  -- A window cannot always be closed from inside an autocommand.
-  if not pcall(vim.api.nvim_win_close, ruler.win, true) then
-    vim.schedule(function() pcall(vim.api.nvim_win_close, ruler.win, true) end)
-  end
+  if ruler then Ui.close(ruler.win) end
 end
 
 -- Draw the overview strip of the diff in `win`: where in the file lines were
@@ -264,34 +250,23 @@ local function draw_ruler(win, view)
   local info = vim.fn.getwininfo(win)[1]
   local height, width = info.height, info.width
   if height < 1 or width <= RULER_WIDTH + view.width + 4 then close_ruler(win); return end
-  local ruler = rulers[win]
-  local place = {relative='win', win=win, anchor='NE', row=info.winbar, col=width,
-    width=RULER_WIDTH, height=height}
-  local shape = height .. 'x' .. width .. '+' .. info.winbar
-  if ruler and vim.api.nvim_win_is_valid(ruler.win) then
-    if ruler.shape ~= shape then vim.api.nvim_win_set_config(ruler.win, place) end
-  else
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[buf].bufhidden = 'wipe'
-    place.focusable, place.style, place.zindex, place.noautocmd = false, 'minimal', 20, true
-    ruler = {win=vim.api.nvim_open_win(buf, false, place), buf=buf}
-    vim.wo[ruler.win].winhighlight = 'Normal:ScmDiffRuler,NormalFloat:ScmDiffRuler'
-    rulers[win] = ruler
-  end
+  local ruler = Ui.anchored(rulers[win], {relative='win', win=win, anchor='NE', row=info.winbar, col=width,
+    width=RULER_WIDTH, height=height}, 'ScmDiffRuler', {zindex=20})
+  rulers[win] = ruler
   local top, bottom
   vim.api.nvim_win_call(win, function() top, bottom = vim.fn.line('w0'), vim.fn.line('w$') end)
-  -- Scrolling within the same rows of the strip changes nothing in it.
-  local drawn = table.concat({shape, top, bottom, view.revision}, ':')
-  if ruler.drawn == drawn then return end
-  ruler.drawn = drawn
-  local cells = M.overview(view.meta, height, top, bottom, view.overview)
-  if ruler.shape ~= shape then
+  if ruler.changed then
     local blank = (' '):rep(RULER_WIDTH)
     local lines = {}
     for row = 1, height do lines[row] = blank end
     vim.api.nvim_buf_set_lines(ruler.buf, 0, -1, false, lines)
-    ruler.shape = shape
+    ruler.drawn = nil
   end
+  -- Scrolling within the same rows of the strip changes nothing in it.
+  local drawn = table.concat({ruler.shape, top, bottom, view.revision}, ':')
+  if ruler.drawn == drawn then return end
+  ruler.drawn = drawn
+  local cells = M.overview(view.meta, height, top, bottom, view.overview)
   vim.api.nvim_buf_clear_namespace(ruler.buf, ns, 0, -1)
   local function paint(row, from, to, group)
     vim.api.nvim_buf_set_extmark(ruler.buf, ns, row - 1, from, {end_col=to, hl_group=group})
@@ -323,23 +298,12 @@ end
 -- TOO_LARGE, without reading the rest, when it is past MAX_BYTES.
 local function read(repo, side, cb)
   if side.git then
-    local chunks, size, process = {}, 0, nil
-    process = vim.system({'git', '-C', repo, 'show', side.git},
-      {text=false, env=require('scm.core').git_env, stdout=function(_, data)
-        if not data or size > MAX_BYTES then return end
-        size = size + #data
-        if size > MAX_BYTES then
-          chunks = {}
-          if process then process:kill(9) end
-        else
-          chunks[#chunks + 1] = data
-        end
-      end}, function(out)
-        vim.schedule(function()
-          if size > MAX_BYTES then cb(TOO_LARGE)
-          else cb(out.code == 0 and table.concat(chunks) or nil) end
-        end)
+    local started = Process.run({'git', '-C', repo, 'show', side.git}, {text=false, env=require('scm.core').git_env,
+      max_bytes=MAX_BYTES}, function(out)
+        if out.too_large then cb(TOO_LARGE)
+        else cb(out.code == 0 and out.stdout or nil) end
       end)
+    if not started then vim.schedule(function() cb(nil) end) end
     return
   end
   local text

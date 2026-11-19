@@ -177,10 +177,10 @@ it answers, and choose it.
 
 | Kind | Asks |
 | --- | --- |
-| Claude Code on this machine | The `claude` command, which may read the repository but not change it. The default. |
+| Claude Code on this machine | The `claude` command, which may read the repository but not change it or read outside it. The default. |
 | Claude API | Anthropic's Messages API. |
 | OpenAI-compatible API | Any service with a chat completions endpoint, such as OpenAI, OpenRouter, Ollama or LM Studio. |
-| A command of your own | Any command that reads the question on standard input and prints the answer. |
+| A command of your own | Any command that reads the question on standard input and prints the answer. It runs outside the repository; `$SCM_REPO` holds the repository's path. |
 
 Every kind has a `style`: how you want things explained, in your own words,
 such as "like I am new to this language". It is added to what the service is
@@ -188,7 +188,8 @@ asked, and a change explained in one style is explained again in another.
 
 A key is never stored. A service names the environment variable that holds
 its key (`key_env`) or a command that prints it (`key_cmd`), such as a
-password manager's. Services can also be set in your configuration:
+password manager's. A key is only sent over `https://`, or over plain
+`http://` to this machine. Services can also be set in your configuration:
 
 ```lua
 opts = {
@@ -209,6 +210,13 @@ opts = {
 | `map` | picture when possible | `"text"` always draws the map with characters. |
 | `map_scale` | `1` | Size of the drawn map. |
 | `map_density` | `2` | Pixels drawn for each pixel of the dock; `1` is enough on a display that is not high-density. |
+
+The repository being explained may not be yours, so nothing in it is
+obeyed. Claude Code is run with only tools that read, confined to the
+repository, without the repository's settings, hooks, MCP servers or
+`CLAUDE.md`, and every service is told that the code is data to explain and
+not instructions. Reviews are kept in Neovim's cache directory, readable by
+you alone; the oldest are removed once there are more than 400.
 
 Set `review = false` to turn all of this off. The Review's colours are the
 highlight groups that start with `ScmReview`; none of its text is brighter

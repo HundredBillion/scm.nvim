@@ -6,6 +6,8 @@
 --   lines  {new = {[line] = note}, old = {[line] = note}}, a note being
 --          {gist, before, detail, inline, paused = {when, values = {{name, value, note}...}}}
 --   flows  {{from, to, note, trigger, later, handoff, outside, steps}...}
+local Ui = require('scm.ui')
+local Files = require('scm.files')
 local M = {}
 
 -- The longest each kind of text is asked to be, in characters.
@@ -21,13 +23,20 @@ M.MAX_LANE, M.MAX_STEPS = 4, 8
 local WHEN = {now=1, later=2, outside=3}
 local STATE = {ran=true, here=true, not_yet=true}
 
--- One line of text no longer than `limit`: control characters become spaces.
+-- Characters that are not seen but change how the text around them is
+-- shown: C1 controls, zero-width spaces and joiners, marks that turn text
+-- right to left, and the byte order mark. As UTF-8 byte patterns.
+local UNSEEN = {'\194[\128-\159]', '\226\128[\139-\143]', '\226\128[\168-\174]', '\226\129[\166-\169]',
+  '\239\187\191'}
+
+-- One line of text no longer than `limit`: control characters become
+-- spaces, and characters that are not seen are taken out.
 local function text(value, limit)
   if type(value) ~= 'string' then return nil end
+  for _, pattern in ipairs(UNSEEN) do value = value:gsub(pattern, '') end
   value = vim.trim((value:gsub('%c', ' '):gsub('%s+', ' ')))
   if value == '' then return nil end
-  if vim.fn.strchars(value) > limit then value = vim.fn.strcharpart(value, 0, limit - 1) .. '…' end
-  return value
+  return Ui.truncate(value, limit)
 end
 
 local function line_number(value)
@@ -141,8 +150,8 @@ function M.decode(answer)
     if answer:sub(i, i) == '}' then last = i; break end
   end
   if not (first and last and last > first) then return nil, 'the answer holds no JSON object' end
-  local ok, value = pcall(vim.json.decode, answer:sub(first, last), {luanil={object=true, array=true}})
-  if not ok then return nil, 'the answer is not valid JSON' end
+  local value = Files.decode(answer:sub(first, last))
+  if value == nil then return nil, 'the answer is not valid JSON' end
   return value
 end
 
