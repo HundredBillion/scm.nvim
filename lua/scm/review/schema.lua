@@ -4,13 +4,16 @@
 -- is not what was asked for. A Review is plain Lua data:
 --   tour   {{title, summary, from, to}...}, by line of the new file
 --   lines  {new = {[line] = note}, old = {[line] = note}}, a note being
---          {gist, detail, inline, paused = {when, values = {{name, value, note}...}}}
+--          {gist, before, detail, inline, paused = {when, values = {{name, value, note}...}}}
 --   flows  {{from, to, note, trigger, later, handoff, outside, steps}...}
 local M = {}
 
--- The longest each kind of text may be, in characters.
+-- The longest each kind of text is asked to be, in characters.
 M.LIMITS = {title=40, summary=90, gist=44, detail=400, inline=40, when=44, name=28, value=44, note=40,
   step=22, says=30, file=24, keys=14, phrase=36}
+-- The Pane and the Tour bar wrap what they show, so their text is cut only when it runs to this
+-- many times the length asked for.
+M.WRAPPED = 3
 -- The most of each list a Review keeps.
 local MAX_TOUR, MAX_VALUES, MAX_FLOWS, MAX_LINES = 12, 5, 12, 4000
 -- A lane holds this many steps at most, and a Flow Map this many in all.
@@ -50,12 +53,12 @@ local function paused(value)
   for _, item in ipairs(list(value.values)) do
     if #values == MAX_VALUES then break end
     if type(item) == 'table' then
-      local name, shown = text(item.name, M.LIMITS.name), text(item.value, M.LIMITS.value)
-      if name and shown then values[#values + 1] = {name=name, value=shown, note=text(item.note, M.LIMITS.note)} end
+      local name, shown = text(item.name, M.LIMITS.name), text(item.value, M.LIMITS.value * M.WRAPPED)
+      if name and shown then values[#values + 1] = {name=name, value=shown, note=text(item.note, M.LIMITS.note * M.WRAPPED)} end
     end
   end
   if #values == 0 then return nil end
-  return {when=text(value.when, M.LIMITS.when), values=values}
+  return {when=text(value.when, M.LIMITS.when * M.WRAPPED), values=values}
 end
 
 local function steps(value)
@@ -92,7 +95,7 @@ function M.normalise(raw)
       local from, to = range(item)
       local title = text(item.title, M.LIMITS.title)
       if from and title then
-        review.tour[#review.tour + 1] = {title=title, summary=text(item.summary, M.LIMITS.summary), from=from, to=to}
+        review.tour[#review.tour + 1] = {title=title, summary=text(item.summary, M.LIMITS.summary * M.WRAPPED), from=from, to=to}
       end
     end
   end
@@ -101,10 +104,11 @@ function M.normalise(raw)
   for _, item in ipairs(list(raw.lines)) do
     if count == MAX_LINES then break end
     local number = type(item) == 'table' and line_number(item.line)
-    local gist = number and text(item.gist, M.LIMITS.gist)
+    local gist = number and text(item.gist, M.LIMITS.gist * M.WRAPPED)
     if gist then
       count = count + 1
       review.lines[item.side == 'old' and 'old' or 'new'][number] = {gist=gist,
+        before=item.side ~= 'old' and text(item.before, M.LIMITS.gist * M.WRAPPED) or nil,
         detail=text(item.detail, M.LIMITS.detail), inline=text(item.inline, M.LIMITS.inline),
         paused=paused(item.paused)}
     end

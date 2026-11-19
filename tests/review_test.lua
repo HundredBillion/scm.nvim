@@ -1,10 +1,10 @@
--- A Review explains a diff: a Tour through its changes, a few words beside
--- each changed line, predicted values, and a Flow Map of how a line gets run.
+-- A Review explains a diff: a Tour through its changes, a Pane about the line
+-- the cursor is on with its predicted values, and a Flow Map of how it gets run.
 vim.env.XDG_CACHE_HOME, vim.env.XDG_DATA_HOME = vim.fn.tempname(), vim.fn.tempname()
 vim.opt.runtimepath:prepend(vim.uv.cwd())
 local Schema = require('scm.review.schema')
 local Flow = require('scm.review.flow')
-local Rail = require('scm.review.rail')
+local Pane = require('scm.review.pane')
 local Prompt = require('scm.review.prompt')
 local Explainers = require('scm.review.explainers')
 
@@ -51,7 +51,7 @@ long.tour[1].from = -4
 long.flows[1].steps[2].when = 'never'
 long.flows[1].steps[5].state = 'here'
 local cut = assert(Schema.normalise(long))
-assert(vim.fn.strchars(cut.lines.new[3].gist) == Schema.LIMITS.gist, 'a long gist is cut to the room the rail has')
+assert(vim.fn.strchars(cut.lines.new[3].gist) == Schema.LIMITS.gist * Schema.WRAPPED, 'a long gist is cut to size')
 assert(cut.lines.new[4].gist == 'two lines of it', 'a gist is one line')
 assert(not cut.lines.new[6] and #cut.tour == 1, 'what does not name a line is dropped')
 assert(cut.flows[1].steps[2].lane == 1, 'a step with no time keeps the time of the step before it')
@@ -95,29 +95,84 @@ local tricky = vim.deepcopy(flow)
 tricky.steps[1].name = 'a<b>&"c"'
 assert(require('scm.review.flowsvg').svg(tricky, {}):find('a&lt;b&gt;&amp;&quot;c&quot;', 1, true), 'names are escaped')
 
--- The rail: a few words beside each line, and a block about the reader's line.
+-- The pane: what the Review says about the reader's line, and no other.
 local meta = {
   {kind=' ', new=1, old=1}, {kind=' ', new=2, old=2}, {kind='-', old=3}, {kind='-', old=4},
   {kind='+', new=3}, {kind='+', new=4}, {kind='+', new=5}, {kind='+', new=6},
   {kind=' ', new=7, old=5}, {kind=' ', new=8, old=6},
 }
 for i = 9, 30 do meta[#meta + 1] = {kind=' ', new=i, old=i - 2} end
-local function text_of(pieces) return table.concat(vim.tbl_map(function(piece) return piece[1] end, pieces)) end
-local rows = Rail.rows(review, meta, 5, 46, 'full')
-assert(text_of(rows[3]):find('before: start every scan', 1, true), 'a removed line has its note from the old file')
-assert(text_of(rows[5]):find('take the first job off the queue', 1, true) and rows[5][1][2] == 'ScmReviewGistCurrent', 'the reader\'s line stands out')
-assert(not rows[7], 'a line with no note is left empty')
-for row, pieces in pairs(rows) do
-  assert(vim.fn.strdisplaywidth(text_of(pieces)) == 46, 'row ' .. row .. ' of the rail is exactly its width: ' .. text_of(pieces))
+local function text_of(pieces)
+  local text = ''
+  for _, piece in ipairs(pieces) do text = text .. piece[1] end
+  return text
 end
-assert(text_of(rows[10]):find('3 + added', 1, true) and text_of(rows[10]):find('K more detail', 1, true), 'the block starts under the change')
-local block = table.concat(vim.tbl_map(text_of, Rail.block(review.lines.new[3], meta[5], 46)), '\n')
-assert(block:find('IF PAUSED HERE  predicted · not a real run', 1, true), 'predicted values are labelled as predicted')
-assert(block:find('queue  { "log" }', 1, true) and block:find('↳ "status" was just taken out', 1, true), 'the values line up:\n' .. block)
-assert(not Rail.rows(review, meta, 5, 46, 'gists')[10], 'the gists mode shows no block')
-assert(#Rail.block(review.lines.new[4], meta[6], 46) == 0, 'a note with nothing more to say has no block')
-assert(Rail.width_in(70) == nil and Rail.width_in(120) == 46, 'a narrow window has no rail')
-assert(vim.deep_equal(Rail.wrap('one two three four', 9), {'one two', 'three', 'four'}), 'prose wraps at spaces')
+local function pane_text(rows) return table.concat(vim.tbl_map(text_of, rows), '\n') end
+local about = Pane.about(review, meta, 5)
+assert(about.before == 'start every scan in one go' and about.now == 'take the first job off the queue', 'an added line knows what it replaced')
+local whole = Pane.rows(about, 48, math.huge)
+local text = pane_text(whole)
+assert(text_of(whole[1]) == '▶ line 3  + added' and whole[1].band, 'the heading names the line: ' .. text_of(whole[1]))
+assert(text_of(whole[2]) == 'before  start every scan in one go' and text_of(whole[3]) == 'now     take the first job off the queue', '"before" comes first, then "now":\n' .. text)
+assert(text:find('IF PAUSED HERE  predicted · not a real run', 1, true), 'predicted values are labelled as predicted')
+assert(text:find('queue   { "log" }', 1, true) and text:find('↳ "status" was just taken out', 1, true), 'the values line up with the labels:\n' .. text)
+assert(not text:find('nothing left', 1, true), 'nothing about another line is shown')
+for _, pieces in ipairs(whole) do
+  assert(vim.fn.strdisplaywidth(text_of(pieces)) <= 46, 'a row fits the pane: ' .. text_of(pieces))
+end
+-- Short of room, the paragraph gives way and "if paused here" does not.
+local squeezed, alone = Pane.rows(about, 48, #whole - 2)
+text = pane_text(squeezed)
+assert(not alone and #squeezed <= #whole - 2 and text:find('queue   { "log" }', 1, true), 'the values stay:\n' .. text)
+assert(text:find('paragraph hidden (2 rows) · K full explanation\nIF PAUSED HERE', 1, true), 'the paragraph says how much of it is left:\n' .. text)
+local least = Pane.rows(about, 48, 8)
+assert(#least == 8 and not pane_text(least):find('Removes', 1, true) and pane_text(least):find('IF PAUSED HERE', 1, true), 'with no room the paragraph goes entirely:\n' .. pane_text(least))
+local floor
+floor, alone = Pane.rows(about, 48, 7)
+assert(alone and text_of(floor[1]) == '▶ line 3  + added · K full explanation', 'less room than that leaves the heading alone: ' .. text_of(floor[1]))
+floor, alone = Pane.rows(about, 48, math.huge, true)
+assert(alone and #floor == 1, 'and so does a narrow window')
+-- Nothing in the Pane is cut short: what does not fit on a row goes on to the next.
+local wordy = vim.deepcopy(about)
+wordy.paused = {when='When put() is first called, old = {a, b, c} and new = {a, x, c}',
+  values={{name='kind', value='" "', note='a space means the line did not change at all'},
+    {name='a_name_far_too_long_for_its_column', value='"' .. ('x'):rep(60) .. '"'}}}
+local wrapped_rows = Pane.rows(wordy, 48, math.huge)
+text = pane_text(wrapped_rows)
+assert(not text:find('…', 1, true), 'no row ends in a cut:\n' .. text)
+assert(text:find('and new = {a, x, c}', 1, true) and text:find('change at all', 1, true)
+  and text:find('a_name_far_too_long_for_its_column', 1, true), 'all of it is there:\n' .. text)
+assert(select(2, text:gsub('x', '')) >= 60, 'a word wider than a row is broken, not cut:\n' .. text)
+for _, pieces in ipairs(wrapped_rows) do
+  assert(vim.fn.strdisplaywidth(text_of(pieces)) <= 46, 'a wrapped row fits the pane: ' .. text_of(pieces))
+end
+local long = vim.deepcopy(about)
+long.detail = ('One more sentence here. '):rep(20)
+text = pane_text(Pane.rows(long, 48, math.huge))
+assert(text:find('sentence here.\n… 6 more rows · K full explanation', 1, true), 'a long paragraph shows six rows at most and stops at the end of a sentence:\n' .. text)
+-- Other lines.
+assert(text_of(Pane.rows(Pane.about(review, meta, 1), 48, math.huge)[1]) == '▶ line 1  no change on this line', 'an unchanged line has the heading alone')
+local own = vim.deepcopy(review)
+own.lines.new[4].before = 'ran every job without looking'
+assert(Pane.about(own, meta, 6).before == 'ran every job without looking' and Pane.about(own, meta, 5).before == 'start every scan in one go', 'a line with a "before" of its own shows that one')
+local with_before = answer()
+with_before.lines[2].before = 'before: looped over every job'
+assert(Pane.about(assert(Schema.normalise(with_before)), meta, 5).before == 'looped over every job', 'and it is kept from what the Explainer sends')
+local removed = Pane.about(review, meta, 4)
+assert(removed.before == 'start every scan in one go' and removed.now == 'nothing left? stop here' and not removed.paused, 'a removed line says what replaced it')
+assert(text_of(Pane.rows(removed, 48, math.huge)[1]) == '▶ line 4  − removed', 'and is named by its old number')
+assert(text_of(Pane.rows(Pane.about(review, meta, 7), 48, math.huge)[1]):find('no note for this line', 1, true), 'a changed line with no note says so')
+assert(not Pane.about(review, meta, 99), 'a row past the end has no pane')
+assert(table.concat(Pane.plain(about), '\n'):find('queue = { "log" }   ("status" was just taken out)', 1, true), 'the same as plain text')
+-- Where it sits: home is the top right; it moves only when it stops fitting.
+local function place(...) return {Pane.place(...)} end
+assert(vim.deep_equal(place(12, 20, 30), {'home', 12}), 'it starts at home')
+assert(vim.deep_equal(place(12, 6, 30), {'bottom', 12}), 'and rests at the bottom when the cursor is high')
+assert(vim.deep_equal(place(12, 16, 40, 'bottom'), {'bottom', 12}), 'it stays where it is while it fits')
+assert(vim.deep_equal(place(12, 30, 40, 'bottom'), {'home', 12}), 'and moves when it does not')
+assert(vim.deep_equal(place(12, 10, 20), {'bottom', 9}), 'when neither side holds it, the larger one does')
+assert(vim.deep_equal(place(12, 10, 20, 'home'), {'home', 7}), 'but it does not change sides for a row or two')
+assert(vim.deep_equal(Pane.wrap('one two three four', 9), {'one two', 'three', 'four'}), 'prose wraps at spaces')
 
 -- What is asked, and where answers are kept.
 local numbered = Prompt.numbered({'a', 'old', 'new', 'z'}, {{kind=' ', new=1, old=1}, {kind='-', old=2}, {kind='+', new=2}, {kind=' ', new=3, old=3}},
@@ -128,6 +183,11 @@ local question = Prompt.build('lua/core.lua', numbered, true)
 assert(question:find('File: lua/core.lua', 1, true) and question:find('"flows"', 1, true) and question:find('PREDICTION', 1, true)
   and question:find('You may read other files', 1, true), 'the question names the file, the shape and the rules')
 assert(not Prompt.build('x', numbered, false):find('You may read other files', 1, true), 'a service that cannot read files is not told to')
+assert(Prompt.build('x', numbered, false, 'like I am ten'):find('written this way.-like I am ten') and not Prompt.build('x', numbered, false, ' '):find('written this way', 1, true), 'the reader\'s style is part of the question')
+assert(Prompt.key('a.lua', 'old', 'new', 'like I am ten') ~= Prompt.key('a.lua', 'old', 'new'), 'and another style is another Review')
+local refused, why = Explainers.put({name='Wrong', kind='claude_code', command='explain things simply'})
+assert(not refused and why:find('no program named "explain"', 1, true), 'a sentence is not taken as the program to run: ' .. tostring(why))
+assert(Explainers.put({name='Styled', kind='command', command='cat', style='like I am ten'}).style == 'like I am ten' and Explainers.remove('Styled'), 'a service keeps its style')
 local key = Prompt.key('a.lua', 'old', 'new')
 assert(key == Prompt.key('a.lua', 'old', 'new') and key ~= Prompt.key('a.lua', 'old', 'newer') and key ~= Prompt.key('b.lua', 'old', 'new'), 'a change has one name')
 assert(Prompt.kept(key) == nil, 'nothing is kept at first')
@@ -233,8 +293,8 @@ vim.uv.fs_chmod(fake_review, 493)
 handle = io.open(fake_review .. '.json', 'w')
 handle:write('Here is the review.\n' .. vim.json.encode(answer()))
 handle:close()
--- A script's screen is 80 cells wide, so the rail is let into less room than it asks for.
-Rail.MIN_CODE = 20
+-- A script's screen is 80 cells wide and 24 tall: the pane is let into less than it asks for.
+Pane.NARROW = 60
 local diff = require('scm.diff')
 require('scm').setup({renderer='terminal', review={explainer='Stand-in', explainers={{name='Stand-in', kind='command', command=fake_review}}}})
 Explainers.use('Stand-in')
@@ -251,8 +311,14 @@ local function floats()
 end
 local function bar_text()
   for _, win in ipairs(floats()) do
-    local line = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, 1, false)[1] or ''
-    if vim.api.nvim_win_get_height(win) == 1 and vim.api.nvim_win_get_width(win) > 20 then return line end
+    -- The bar wraps: a later row starts with the space that stood between two words.
+    local line = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false))
+    if vim.api.nvim_win_get_config(win).zindex == 21 then return line end
+  end
+end
+local function bar_window()
+  for _, win in ipairs(floats()) do
+    if vim.api.nvim_win_get_config(win).zindex == 21 then return win end
   end
 end
 local buf = show()
@@ -260,18 +326,26 @@ assert(bar_text():find('\\e explain this change with Stand-in', 1, true), 'a dif
 assert(not require('scm.review.strip').window(), 'and has no strip under it')
 assert(vim.fn.maparg('\\e', 'n', false, true).buffer == 1 and vim.fn.maparg(']t', 'n', false, true).buffer == 1, 'the keys are bound in the diff')
 -- Asking: nothing is sent until the reader asks.
-Review.rail()
+Review.pane()
 assert(bar_text():find('Stand-in is reading this change', 1, true), 'the bar says who is reading: ' .. bar_text())
 assert(vim.wait(10000, function() return bar_text():find('TOUR', 1, true) ~= nil end, 10), 'the Review arrives: ' .. bar_text())
 assert(bar_text():find('step 1 of 2', 1, true) and bar_text():find('Scans one at a time', 1, true)
   and bar_text():find('lines 3–6', 1, true), 'the bar shows the step the cursor is in: ' .. bar_text())
+-- A bar with more to say than one row holds takes more rows, and cuts nothing.
+assert(vim.api.nvim_win_get_height(bar_window()) > 1 and not bar_text():find('…', 1, true)
+  and bar_text():find('Now: one per tick.', 1, true), 'the bar wraps what does not fit: ' .. bar_text())
+assert(vim.fn.winline() > vim.api.nvim_win_get_height(bar_window()), 'the line the reader is on is not under the bar')
+for _, row in ipairs(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(bar_window()), 0, -1, false)) do
+  assert(vim.fn.strdisplaywidth(row) <= vim.api.nvim_win_get_width(bar_window()), 'a row of the bar fits it: ' .. row)
+end
 local strip = require('scm.review.strip').window()
 assert(strip and vim.api.nvim_win_get_height(strip) == 1, 'a short editor shows one row of the flow map under the diff')
 Review.map()
 strip = require('scm.review.strip').window()
 assert(strip and vim.api.nvim_win_get_height(strip) > 5, 'and \\m opens the whole map')
 local strip_text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(strip), 0, -1, false), '\n')
-assert(strip_text:find('drain_scans()', 1, true) and strip_text:find(']t next tour step (2 of 2)', 1, true), 'with the keys under it:\n' .. strip_text)
+assert(strip_text:find('drain_scans()', 1, true) and strip_text:find(']t next step (2 of 2)', 1, true) and strip_text:find('K full explanation', 1, true)
+  and strip_text:find('g? all keys', 1, true) and not strip_text:find('[t previous', 1, true), 'with the keys under it, whole, the least needed left out of a narrow window:\n' .. strip_text)
 assert(vim.wo[strip].winbar:find('HOW THIS LINE GETS RUN', 1, true) and vim.wo[strip].winfixwidth, 'and its heading above')
 assert(Review.step(1) and vim.api.nvim_win_get_cursor(window)[1] == 11, ']t goes to the next step, at row ' .. vim.api.nvim_win_get_cursor(window)[1])
 assert(bar_text():find('step 2 of 2  ✓ ●', 1, true), 'the step left behind is ticked: ' .. bar_text())
@@ -282,7 +356,8 @@ Review.step(1)
 Review.map()
 strip = require('scm.review.strip').window()
 assert(vim.api.nvim_win_get_height(strip) == 1 and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(strip), 0, 1, false)[1]:find('\\m map', 1, true), 'the map folds to one row')
--- The screen: the rail beside the code, the marks in the gutter.
+-- The screen: the pane over the right of the code, the marks in the gutter.
+vim.o.lines = 40
 vim.cmd('doautocmd CursorMoved')
 vim.cmd('redraw')
 local function screen_row(row)
@@ -290,32 +365,37 @@ local function screen_row(row)
   for col = 1, vim.o.columns do text = text .. vim.fn.screenstring(row, col) end
   return text
 end
-local screen = {}
-for row = 1, vim.o.lines do screen[row] = screen_row(row) end
-local all = table.concat(screen, '\n')
-assert(all:find('take the first job off the queue', 1, true) and all:find('before: start every scan', 1, true), 'gists are drawn beside the code:\n' .. all)
+local function screen_text()
+  local rows = {}
+  for row = 1, vim.o.lines do rows[row] = screen_row(row) end
+  return table.concat(rows, '\n')
+end
+local all = screen_text()
+assert(all:find('▶ line 3  + added', 1, true) and all:find('now     take the first job off the queue', 1, true), 'the pane explains the reader\'s line:\n' .. all)
 assert(all:find('IF PAUSED HERE  predicted · not a real run', 1, true), 'the predicted values are drawn')
+assert(not all:find('nothing left? stop here', 1, true), 'and no other line is explained')
 assert(all:find('▶  3+', 1, true) and all:find('▏  4+', 1, true), 'the gutter marks the step')
 assert(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == 'local queue = {}', 'none of it is text in the buffer')
+local pane = assert(Review.pane_window(window), 'the pane is a window floating over the diff')
+local pane_place = vim.api.nvim_win_get_config(pane)
+assert(not pane_place.focusable, 'that the cursor never enters')
+local cursor_row = vim.fn.screenpos(window, 5, 1).row
+local top = vim.fn.win_screenpos(pane)[1]
+assert(top > cursor_row + 1 or top + vim.api.nvim_win_get_height(pane) + 1 < cursor_row - 1, 'it leaves the reader\'s line and a row beside it clear:\n' .. all)
+assert(vim.fn.win_screenpos(pane)[1] + vim.api.nvim_win_get_height(pane) < vim.fn.win_screenpos(window)[1] + vim.api.nvim_win_get_height(window) + 1, 'and ends above the map')
 vim.api.nvim_win_set_cursor(window, {1, 0})
 vim.cmd('doautocmd CursorMoved')
 vim.cmd('redraw')
-assert(screen_row(3):find('1  local queue = {}', 1, true), 'line 1 is not hidden under the bar: ' .. screen_row(3))
--- Less in the rail, and none.
+assert(screen_text():find('1  local queue = {}', 1, true), 'line 1 is not hidden under the bar:\n' .. screen_text())
+assert(screen_text():find('▶ line 1  no change on this line', 1, true), 'an unchanged line keeps the heading:\n' .. screen_text())
+-- The pane is put away, and brought back.
 vim.api.nvim_win_set_cursor(window, {5, 0})
-Review.rail()
+Review.pane()
 vim.cmd('redraw')
-all = ''
-for row = 1, vim.o.lines do all = all .. screen_row(row) .. '\n' end
-assert(Review.mode() == 'gists' and all:find('take the first job', 1, true) and not all:find('IF PAUSED HERE', 1, true), 'gists alone')
-Review.rail()
+assert(not Review.shown() and not Review.pane_window(window) and not screen_text():find('IF PAUSED HERE', 1, true), '\\e hides the pane')
+Review.pane()
 vim.cmd('redraw')
-all = ''
-for row = 1, vim.o.lines do all = all .. screen_row(row) .. '\n' end
-assert(Review.mode() == 'off' and not all:find('take the first job', 1, true), 'and no rail')
-assert(all:find('≈ job = "status" (predicted)', 1, true), 'the predicted value follows the reader\'s line')
-Review.rail()
-assert(Review.mode() == 'full', 'and back')
+assert(Review.shown() and screen_text():find('IF PAUSED HERE', 1, true), 'and shows it again')
 -- The Review is kept: the next time nothing is asked.
 os.remove(fake_review .. '.json')
 vim.cmd('enew')
@@ -327,7 +407,7 @@ table.insert(new, 5, '  -- one more line')
 write(new)
 diff.reload()
 assert(vim.wait(5000, function() return bar_text() and bar_text():find('explain this change', 1, true) ~= nil end, 10), 'an edited file has no Review yet: ' .. tostring(bar_text()))
-Review.rail()
+Review.pane()
 assert(vim.wait(10000, function() return bar_text():find('Could not explain', 1, true) ~= nil end, 10), 'a failure is said in the bar: ' .. bar_text())
 -- The admin page.
 require('scm').explainers()

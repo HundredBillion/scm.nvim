@@ -141,10 +141,13 @@ A Review adds four things around the diff:
 - **A Tour.** The bar under the header names the step you are on, with a
   title and one sentence about it. `]t` and `[t` move between steps, and the
   gutter marks the lines of the current one.
-- **The Rail.** A column at the right says in a few words what each changed
-  line does. Under the change you are in, it adds a paragraph about the line
-  under the cursor.
-- **If paused here.** For a line that sets a value, the Rail shows what the
+- **The Pane.** A box floating at the right explains the line under the
+  cursor, and no other: what it was before, what it is now, and a paragraph
+  about it. It sits at the top right and moves to the bottom right only when
+  it would not fit above your line, so it never covers the line you are on
+  and always ends above the map. In a short window the paragraph gives way
+  first; in a narrow one the Pane is a single row and `K` opens the rest.
+- **If paused here.** For a line that sets a value, the Pane shows what the
   values would be just after that line ran. These are the Explainer's
   prediction and are always labelled "predicted"; they are not recorded from
   a real run.
@@ -156,9 +159,9 @@ A Review adds four things around the diff:
 
 | Key in a diff | Action |
 | --- | --- |
-| `\e` | Explain this change; after that, show more or less in the Rail (full, gists, off). |
+| `\e` | Explain this change; after that, show or hide the Pane. |
 | `]t` / `[t` | Next / previous step of the Tour. |
-| `K` | More about the line under the cursor. |
+| `K` | The full explanation of the line under the cursor. |
 | `\a` | Ask a question about the line under the cursor. |
 | `\m` | Show the whole map, or one row of it. |
 | `\R` | Explain this change again. |
@@ -178,6 +181,10 @@ it answers, and choose it.
 | Claude API | Anthropic's Messages API. |
 | OpenAI-compatible API | Any service with a chat completions endpoint, such as OpenAI, OpenRouter, Ollama or LM Studio. |
 | A command of your own | Any command that reads the question on standard input and prints the answer. |
+
+Every kind has a `style`: how you want things explained, in your own words,
+such as "like I am new to this language". It is added to what the service is
+asked, and a change explained in one style is explained again in another.
 
 A key is never stored. A service names the environment variable that holds
 its key (`key_env`) or a command that prints it (`key_cmd`), such as a

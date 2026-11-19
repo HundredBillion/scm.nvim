@@ -15,6 +15,7 @@ local function summary(service)
   end
   if service.key_env then parts[#parts + 1] = 'key in $' .. service.key_env
   elseif service.key_cmd then parts[#parts + 1] = 'key from a command' end
+  if service.style then parts[#parts + 1] = 'style: ' .. service.style end
   if service.fixed then parts[#parts + 1] = 'set in your configuration' end
   return table.concat(parts, ' · ')
 end
@@ -36,7 +37,7 @@ local function draw()
   marks[#marks + 1] = {#lines - 2, 'ScmReviewHintKey'}
   -- The page may be narrower than this sentence.
   local room = vim.api.nvim_win_is_valid(page.win) and vim.api.nvim_win_get_width(page.win) - 4 or 72
-  for _, text in ipairs(require('scm.review.rail').wrap('A key is never kept here. A service names the environment '
+  for _, text in ipairs(require('scm.review.pane').wrap('A key is never kept here. A service names the environment '
     .. 'variable that holds its key, or a command that prints it. The change you are reading is sent to the '
     .. 'service in use when you ask for it to be explained.', room)) do
     lines[#lines + 1] = '  ' .. text
@@ -92,6 +93,7 @@ end
 local function saved(service)
   local kept, why = Explainers.put(service)
   if kept then say(('Saved "%s".'):format(kept.name)) else say(why, true) end
+  if kept then require('scm.review').restyle() end
 end
 
 function M.add()
@@ -128,7 +130,7 @@ function M.use()
   if not service then return end
   Explainers.use(service.name)
   say(('Changes are now explained by "%s".'):format(service.name))
-  require('scm.review').sync()
+  require('scm.review').restyle()
 end
 
 function M.test()

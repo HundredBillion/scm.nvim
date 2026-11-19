@@ -7,17 +7,18 @@ local M = {}
 
 -- The kinds of service, and what each needs to be told.
 M.KINDS = {
-  claude_code={label='Claude Code on this machine', fields={'command', 'model'},
+  claude_code={label='Claude Code on this machine', fields={'command', 'model', 'style'},
     defaults={command='claude'}},
-  anthropic={label='Claude API', fields={'model', 'key_env', 'key_cmd', 'url'},
+  anthropic={label='Claude API', fields={'model', 'key_env', 'key_cmd', 'url', 'style'},
     defaults={model='claude-opus-5-5', key_env='ANTHROPIC_API_KEY', url='https://api.anthropic.com'}},
-  openai={label='OpenAI-compatible API', fields={'url', 'model', 'key_env', 'key_cmd'},
+  openai={label='OpenAI-compatible API', fields={'url', 'model', 'key_env', 'key_cmd', 'style'},
     defaults={url='https://api.openai.com/v1', key_env='OPENAI_API_KEY'}},
-  command={label='A command of your own', fields={'command'}, defaults={}},
+  command={label='A command of your own', fields={'command', 'style'}, defaults={}},
 }
 M.KIND_ORDER = {'claude_code', 'anthropic', 'openai', 'command'}
 M.FIELD_HELP = {
-  command='the command to run; the question is sent to its standard input',
+  command='the program to run, not what to ask it; the question is sent to its standard input',
+  style='how to explain, in your own words, such as "like I am new to this language" (blank for the usual way)',
   model='the model to ask (blank for the service\'s own default)',
   url='where the service answers',
   key_env='the environment variable that holds the key',
@@ -118,6 +119,12 @@ function M.put(service)
   for _, field in ipairs(M.KINDS[service.kind].fields) do
     local value = service[field]
     if type(value) == 'string' and vim.trim(value) ~= '' then kept[field] = vim.trim(value) end
+  end
+  -- A sentence typed where the program's name belongs would only fail later, when a change is explained.
+  local program = service.kind == 'claude_code' and kept.command and kept.command:match('^%S+')
+  if program and vim.fn.executable(program) ~= 1 then
+    return nil, ('there is no program named "%s". The command is the program to run; how to explain goes in "style"')
+      :format(program)
   end
   if known then
     for i, other in ipairs(state.services) do

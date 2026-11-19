@@ -123,8 +123,8 @@ _Avoid_: partially staged, dirty-staged
 
 **Review**:
 An Explainer's account of one file's change, shown around its diff: a Tour, a
-gist beside each changed line, a paragraph and Predicted Values for the line
-under the cursor, and Flow Maps. It is kept by the two texts it compares, so
+Pane that explains the line under the cursor with its Predicted Values, and
+Flow Maps. It is kept by the two texts it compares, so
 the same change is explained once.
 _Avoid_: explanation (one part of it), annotation, code review (people do that)
 
@@ -139,10 +139,11 @@ The ordered steps of a Review, each a range of lines with a title and one
 sentence, that the reader walks through with `]t` and `[t`.
 _Avoid_: walkthrough, guide
 
-**Rail**:
-The column at the right of a diff where a Review's gists, the paragraph about
-the current line and its Predicted Values are drawn.
-_Avoid_: sidebar, panel (the Panel is the source control list)
+**Pane**:
+The box floating at the right of a diff that explains the line the cursor is
+on, and no other: what it was before, what it is now, a paragraph about it
+and its Predicted Values.
+_Avoid_: rail, sidebar, panel (the Panel is the source control list)
 
 **Predicted Values**:
 What an Explainer expects the variables to hold just after a line runs for
