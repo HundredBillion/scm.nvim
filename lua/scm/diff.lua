@@ -5,6 +5,9 @@
 local M = {}
 local ns = vim.api.nvim_create_namespace('scm.diff')
 local text_diff = vim.text and vim.text.diff or vim.diff
+local Review = require('scm.review')
+local Ui = require('scm.ui')
+local Process = require('scm.process')
 
 -- What each Change Group compares, as the header names it.
 local SOURCES = {changes='diff', staged='staged diff', committed='branch diff'}
@@ -36,14 +39,14 @@ local function lines_of(text)
 end
 
 -- Merge the old and new lines into one list. Returns the lines, what each is
--- ({kind = ' ', '+' or '-', new = its number in the new file}), and the
--- first row of every run of changed lines.
+-- ({kind = ' ', '+' or '-', new = its number in the new file, old = its
+-- number in the old one}), and the first row of every run of changed lines.
 function M.merge(old, new)
   local lines, meta, hunks = {}, {}, {}
   local added, removed = 0, 0
-  local function put(text, kind, number)
+  local function put(text, kind, number, old_number)
     lines[#lines + 1] = text
-    meta[#meta + 1] = {kind=kind, new=number}
+    meta[#meta + 1] = {kind=kind, new=number, old=old_number}
   end
   local a, b = 1, 1
   local changes = {}
@@ -57,12 +60,12 @@ function M.merge(old, new)
     -- A change that removes nothing names the old line it follows.
     local first = count_a > 0 and start_a or start_a + 1
     while a < first do
-      put(new[b], ' ', b)
+      put(new[b], ' ', b, a)
       a, b = a + 1, b + 1
     end
     hunks[#hunks + 1] = {row=#lines + 1, removed=count_a, added=count_b}
     for _ = 1, count_a do
-      put(old[a], '-')
+      put(old[a], '-', nil, a)
       a = a + 1
     end
     for _ = 1, count_b do
@@ -119,23 +122,12 @@ function M.emphasis(old, new)
   return old_ranges, new_ranges
 end
 
--- Mix `alpha` of colour `top` over `bottom`, as a translucent layer would.
-local function mix(top, bottom, alpha)
-  local out = 0
-  for shift = 16, 0, -8 do
-    local t, b = bit.band(bit.rshift(top, shift), 255), bit.band(bit.rshift(bottom, shift), 255)
-    out = out + bit.lshift(math.floor(t * alpha + b * (1 - alpha) + 0.5), shift)
-  end
-  return out
-end
-
 -- VS Code's diff colours are translucent layers over the editor background;
 -- a terminal cell has one colour, so each is mixed here.
 function M.highlights()
-  local function color(name, key, fallback)
-    return vim.api.nvim_get_hl(0, {name=name, link=false})[key] or fallback
-  end
+  local mix, color = Ui.mix, Ui.color
   local dark = vim.o.background == 'dark'
+  local strong = mix(color('Normal', 'fg', dark and 0xacb2be or 0x333333), color('Normal', 'bg', dark and 0x1e1e1e or 0xffffff), 0.97)
   local background = color('Normal', 'bg', dark and 0x1e1e1e or 0xffffff)
   local number = color('LineNr', 'fg', dark and 0x858585 or 0x237893)
   local add_line, delete_line = mix(0x9bb955, background, 0.2), mix(0xff0000, background, 0.2)
@@ -145,9 +137,10 @@ function M.highlights()
     ScmDiffAddNr={fg=number, bg=add_line}, ScmDiffDeleteNr={fg=number, bg=delete_line},
     ScmDiffAddSign={fg=dark and 0x81b88b or 0x2f7d32, bg=add_line},
     ScmDiffDeleteSign={fg=dark and 0xc74e39 or 0xb3261e, bg=delete_line},
-    ScmDiffHeader={fg=color('Normal', 'fg'), bg=background},
+    -- Bold carries weight, not brightness: nothing in the header is brighter than a shade under the text.
+    ScmDiffHeader={fg=strong, bg=background},
     ScmDiffSource={fg=color('Comment', 'fg', number), bg=background},
-    ScmDiffButton={fg=color('Normal', 'fg'), bg=background, bold=true},
+    ScmDiffButton={fg=strong, bg=background, bold=true},
     ScmDiffRuler={bg=background},
     ScmDiffRulerView={bg=mix(color('Normal', 'fg', dark and 0xcccccc or 0x333333), background, 0.14)},
     ScmDiffRulerAdd={bg=mix(0x9bb955, background, 0.6)}, ScmDiffRulerDelete={bg=mix(0xff0000, background, 0.6)},
@@ -165,11 +158,14 @@ function M.gutter()
   if not view then return '' end
   local width = view.width
   local line = view.meta[vim.v.lnum]
-  if not line or vim.v.virtnum ~= 0 then return (' '):rep(width + 3) end
+  -- A diff with a Tour marks the lines of the step the reader is on.
+  local tour = Review.has_gutter(view)
+  if not line or vim.v.virtnum ~= 0 then return (' '):rep(width + 3 + (tour and 1 or 0)) end
+  local mark = tour and Review.gutter(view, vim.v.lnum, vim.fn.line('.')) or ''
   local number = line.new and ('%' .. width .. 'd'):format(line.new) or (' '):rep(width)
-  if line.kind == '+' then return '%#ScmDiffAddNr# ' .. number .. '%#ScmDiffAddSign#+ ' end
-  if line.kind == '-' then return '%#ScmDiffDeleteNr# ' .. number .. '%#ScmDiffDeleteSign#- ' end
-  return '%#LineNr# ' .. number .. '  '
+  if line.kind == '+' then return mark .. '%#ScmDiffAddNr# ' .. number .. '%#ScmDiffAddSign#+ ' end
+  if line.kind == '-' then return mark .. '%#ScmDiffDeleteNr# ' .. number .. '%#ScmDiffDeleteSign#- ' end
+  return mark .. '%#LineNr# ' .. number .. '  '
 end
 
 -- The header above the diff: the file, what it is compared against, how many
@@ -179,10 +175,18 @@ function M.header()
   -- While a window's gutter or header is drawn, that window is the current one.
   local view = views[vim.api.nvim_get_current_buf()]
   if not view then return '' end
-  local function escape(text) return (text:gsub('%%', '%%%%')) end
+  local escape = Ui.escape
   local counts = ''
   if view.stats and view.stats.added + view.stats.removed > 0 then
     counts = '%#ScmDiffAddSign# +' .. view.stats.added .. ' %#ScmDiffDeleteSign# -' .. view.stats.removed .. ' '
+  end
+  -- Which change the cursor is in or has just passed.
+  if #view.hunks > 0 then
+    local row, at = vim.fn.line('.'), 1
+    for i, hunk in ipairs(view.hunks) do
+      if hunk.row <= row then at = i end
+    end
+    counts = counts .. '%#ScmDiffSource# change ' .. at .. '/' .. #view.hunks .. ' '
   end
   local function button(id, label)
     return '%' .. id .. '@v:lua.ScmDiffClick@%#ScmDiffButton# ' .. label .. ' %X'
@@ -239,11 +243,7 @@ end
 local function close_ruler(win)
   local ruler = rulers[win]
   rulers[win] = nil
-  if not (ruler and vim.api.nvim_win_is_valid(ruler.win)) then return end
-  -- A window cannot always be closed from inside an autocommand.
-  if not pcall(vim.api.nvim_win_close, ruler.win, true) then
-    vim.schedule(function() pcall(vim.api.nvim_win_close, ruler.win, true) end)
-  end
+  if ruler then Ui.close(ruler.win) end
 end
 
 -- Draw the overview strip of the diff in `win`: where in the file lines were
@@ -252,34 +252,23 @@ local function draw_ruler(win, view)
   local info = vim.fn.getwininfo(win)[1]
   local height, width = info.height, info.width
   if height < 1 or width <= RULER_WIDTH + view.width + 4 then close_ruler(win); return end
-  local ruler = rulers[win]
-  local place = {relative='win', win=win, anchor='NE', row=info.winbar, col=width,
-    width=RULER_WIDTH, height=height}
-  local shape = height .. 'x' .. width .. '+' .. info.winbar
-  if ruler and vim.api.nvim_win_is_valid(ruler.win) then
-    if ruler.shape ~= shape then vim.api.nvim_win_set_config(ruler.win, place) end
-  else
-    local buf = vim.api.nvim_create_buf(false, true)
-    vim.bo[buf].bufhidden = 'wipe'
-    place.focusable, place.style, place.zindex, place.noautocmd = false, 'minimal', 20, true
-    ruler = {win=vim.api.nvim_open_win(buf, false, place), buf=buf}
-    vim.wo[ruler.win].winhighlight = 'Normal:ScmDiffRuler,NormalFloat:ScmDiffRuler'
-    rulers[win] = ruler
-  end
+  local ruler = Ui.anchored(rulers[win], {relative='win', win=win, anchor='NE', row=info.winbar, col=width,
+    width=RULER_WIDTH, height=height}, 'ScmDiffRuler', {zindex=20})
+  rulers[win] = ruler
   local top, bottom
   vim.api.nvim_win_call(win, function() top, bottom = vim.fn.line('w0'), vim.fn.line('w$') end)
-  -- Scrolling within the same rows of the strip changes nothing in it.
-  local drawn = table.concat({shape, top, bottom, view.revision}, ':')
-  if ruler.drawn == drawn then return end
-  ruler.drawn = drawn
-  local cells = M.overview(view.meta, height, top, bottom, view.overview)
-  if ruler.shape ~= shape then
+  if ruler.changed then
     local blank = (' '):rep(RULER_WIDTH)
     local lines = {}
     for row = 1, height do lines[row] = blank end
     vim.api.nvim_buf_set_lines(ruler.buf, 0, -1, false, lines)
-    ruler.shape = shape
+    ruler.drawn = nil
   end
+  -- Scrolling within the same rows of the strip changes nothing in it.
+  local drawn = table.concat({ruler.shape, top, bottom, view.revision}, ':')
+  if ruler.drawn == drawn then return end
+  ruler.drawn = drawn
+  local cells = M.overview(view.meta, height, top, bottom, view.overview)
   vim.api.nvim_buf_clear_namespace(ruler.buf, ns, 0, -1)
   local function paint(row, from, to, group)
     vim.api.nvim_buf_set_extmark(ruler.buf, ns, row - 1, from, {end_col=to, hl_group=group})
@@ -311,23 +300,12 @@ end
 -- TOO_LARGE, without reading the rest, when it is past MAX_BYTES.
 local function read(repo, side, cb)
   if side.git then
-    local chunks, size, process = {}, 0, nil
-    process = vim.system({'git', '-C', repo, 'show', side.git},
-      {text=false, env=require('scm.core').git_env, stdout=function(_, data)
-        if not data or size > MAX_BYTES then return end
-        size = size + #data
-        if size > MAX_BYTES then
-          chunks = {}
-          if process then process:kill(9) end
-        else
-          chunks[#chunks + 1] = data
-        end
-      end}, function(out)
-        vim.schedule(function()
-          if size > MAX_BYTES then cb(TOO_LARGE)
-          else cb(out.code == 0 and table.concat(chunks) or nil) end
-        end)
+    local started = Process.run({'git', '-C', repo, 'show', side.git}, {text=false, env=require('scm.core').git_env,
+      max_bytes=MAX_BYTES}, function(out)
+        if out.too_large then cb(TOO_LARGE)
+        else cb(out.code == 0 and out.stdout or nil) end
       end)
+    if not started then vim.schedule(function() cb(nil) end) end
     return
   end
   local text
@@ -509,8 +487,10 @@ local function create(spec, name)
   }) do
     vim.keymap.set('n', key, run, {buffer=buf, nowait=true})
   end
+  Review.keys(buf)
   vim.api.nvim_create_autocmd('BufWipeout', {buffer=buf, once=true, callback=function()
     views[buf], by_name[name] = nil, nil
+    Review.detach(view)
   end})
   return view
 end
@@ -555,6 +535,7 @@ function M.open(spec, done)
       vim.api.nvim_win_call(win, function() vim.cmd('normal! zz') end)
     end
     rulers_sync()
+    Review.attach(view)
     if done then done(view.buf) end
   end)
 end
@@ -577,6 +558,7 @@ function M.reload()
         vim.api.nvim_win_call(win, function() vim.fn.winrestview(place) end)
       end
       rulers_sync()
+      Review.attach(view)
     end)
   end
 end
@@ -591,8 +573,10 @@ function M.is_diff(buf)
   return views[buf] ~= nil
 end
 
-function M.setup()
+-- `opts` are SCM's options; `opts.review` sets up the Review of a diff.
+function M.setup(opts)
   M.highlights()
+  Review.setup((opts or {}).review, function(buf) return views[buf] end)
   local group = vim.api.nvim_create_augroup('ScmDiff', {clear=true})
   vim.api.nvim_create_autocmd('ColorScheme', {group=group, callback=M.highlights})
   vim.api.nvim_create_autocmd({'BufWinEnter', 'BufEnter'}, {group=group, callback=function()

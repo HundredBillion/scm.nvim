@@ -121,6 +121,41 @@ e.g. `MM`). It is a row in Staged Changes with its index Badge and a row in
 Changes with its working-tree Badge.
 _Avoid_: partially staged, dirty-staged
 
+**Review**:
+An Explainer's account of one file's change, shown around its diff: a Tour, a
+Pane that explains the line under the cursor with its Predicted Values, and
+Flow Maps. It is kept by the two texts it compares, so
+the same change is explained once.
+_Avoid_: explanation (one part of it), annotation, code review (people do that)
+
+**Explainer**:
+A language model service that writes Reviews: Claude Code on this machine by
+default, or any service the user connects on the admin page. SCM never stores
+an Explainer's key.
+_Avoid_: provider, backend, AI
+
+**Tour**:
+The ordered steps of a Review, each a range of lines with a title and one
+sentence, that the reader walks through with `]t` and `[t`.
+_Avoid_: walkthrough, guide
+
+**Pane**:
+The box floating at the right of a diff that explains the line the cursor is
+on, and no other: what it was before, what it is now, a paragraph about it
+and its Predicted Values.
+_Avoid_: rail, sidebar, panel (the Panel is the source control list)
+
+**Predicted Values**:
+What an Explainer expects the variables to hold just after a line runs for
+the first time. Always shown labelled "predicted": they are a guess, never a
+recording of a run.
+_Avoid_: debug values, runtime values, state
+
+**Flow Map**:
+The drawing of how a line gets run: the functions on the way to it, in lanes
+that are moments in time (right away, later, outside the program).
+_Avoid_: call stack, stack trace, call graph
+
 **Refresh**:
 Recalculation of Repo Entries after relevant user activity. A Refresh targets
 the containing repository after a save, or all discovered repositories when the

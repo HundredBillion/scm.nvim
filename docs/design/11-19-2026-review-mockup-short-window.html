@@ -1,0 +1,201 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html,body{margin:0}
+.t{font-family:var(--font-mono);font-size:calc((100vw - 40px)/74);line-height:1.5;background:var(--code-background);
+   color:var(--foreground);border:1px solid var(--border);overflow:hidden;position:relative}
+.t *{box-sizing:border-box}
+.r{display:flex}.f{flex:1;min-width:0}.sp{flex:1}
+.bb{border-bottom:1px solid var(--border)}.bt{border-top:1px solid var(--border)}.bl{border-left:1px solid var(--border)}.br{border-right:1px solid var(--border)}
+.p{padding:0 1ch}.py{padding-top:.75em;padding-bottom:.75em}
+.dim{color:var(--muted-foreground)}.inf{color:var(--info)}.ok{color:var(--success)}.bad{color:var(--destructive)}.wrn{color:var(--warning)}
+.b{font-weight:700}.pre{white-space:pre}.wrap{white-space:pre-wrap}
+.hd{color:var(--info);font-weight:700}
+.ln{display:flex;white-space:pre}.ln .g{flex:0 0 5ch;text-align:right;color:var(--muted-foreground)}.ln .s{flex:0 0 3ch;text-align:center}.ln .c{flex:1;overflow:hidden}
+.add{background:color-mix(in srgb,var(--success) 16%,transparent)}.add .s{color:var(--success)}
+.del{background:color-mix(in srgb,var(--destructive) 16%,transparent)}.del .s{color:var(--destructive)}
+.faded .c,.faded .g{opacity:.45}
+.cur{background:color-mix(in srgb,var(--info) 26%,transparent)}.cur .g{color:var(--info);font-weight:700;opacity:1}
+.mm{flex:0 0 1ch;position:relative;border-left:1px solid var(--border)}.mm i{position:absolute;left:0;right:0}
+.sel{background:color-mix(in srgb,var(--info) 18%,transparent)}
+.box{border:1px solid var(--border)}.boxw{border:1px solid var(--warning);background:color-mix(in srgb,var(--warning) 12%,transparent)}.boxg{border:1px solid var(--success)}.boxi{border:1px solid var(--info)}
+.st{background:color-mix(in srgb,var(--foreground) 6%,transparent)}
+.gone{color:var(--destructive);text-decoration:line-through}
+.bar{overflow:hidden}.rt{float:right}
+.ghost{color:var(--info);opacity:.85;font-style:italic}
+
+.dim{color:color-mix(in srgb,var(--foreground) 86%,var(--code-background))}
+.faded .c{opacity:.8}
+.ln .g{flex:0 0 7ch;color:color-mix(in srgb,var(--foreground) 86%,var(--code-background));opacity:1}
+.ln .s{flex:0 0 2ch;text-align:left}
+.faded .g{opacity:1}
+.k{font-weight:700;color:var(--foreground)}
+.cap{color:color-mix(in srgb,var(--foreground) 86%,var(--code-background));font-weight:700}
+.lb{border-left:2px solid var(--warning);padding-left:1ch}
+.hint{color:var(--foreground)}
+.fill{background:color-mix(in srgb,var(--info) 17%,transparent)}
+.fillfull{background:color-mix(in srgb,var(--info) 26%,transparent)}
+.band .cur{background:transparent}
+.bandbar{position:absolute;left:0;right:0;height:1.5em;background:color-mix(in srgb,var(--info) 26%,transparent);pointer-events:none}
+.okd{color:color-mix(in srgb,var(--success) 60%,var(--muted-foreground))}
+.lift{background:color-mix(in srgb,var(--foreground) 5%,transparent)}
+.scope{color:var(--foreground)}
+.gst{color:color-mix(in srgb,var(--foreground) 72%,var(--code-background))}
+.it{font-style:italic}
+.rt{float:right}
+
+.t{--foreground:#acb2be;--code-background:#1e1f22;--info:#73ade9;--warning:#d9a35c;--success:#8fbf7a;--destructive:#d07277;
+   --border:#393b40;--muted-foreground:#7f8794;color:#acb2be;background:#1e1f22}
+
+.gst{color:color-mix(in srgb,var(--foreground) 88%,var(--code-background))} .gst.it{color:color-mix(in srgb,var(--foreground) 94%,var(--code-background))} .faded .c{opacity:.92}
+.pred{color:var(--warning)}
+.prose{color:color-mix(in srgb,var(--foreground) 96%,var(--code-background))} .nm{color:#8dbdee}
+.pk{color:#8dbdee} .pv{font-weight:700;color:var(--val)} .pp{color:color-mix(in srgb,var(--foreground) 76%,var(--code-background))}
+.pn{color:color-mix(in srgb,var(--foreground) 86%,var(--code-background))} .gl{color:color-mix(in srgb,var(--foreground) 62%,var(--code-background))} .reg{color:#b7bdc8} .fq{color:color-mix(in srgb,var(--foreground) 86%,var(--code-background));font-weight:700} .lw{font-weight:400} .del .c{color:#c3c8d1} .hv{color:#8fd6cd} .pnote .hv{color:var(--val)} .pnote{color:color-mix(in srgb,var(--foreground) 92%,var(--code-background))} .pnote .hv{color:var(--val)} .gst.it{font-style:normal} .pred{color:color-mix(in srgb,var(--warning) 72%,#fff)} .hv{color:var(--val)}
+.plabel{background:color-mix(in srgb,var(--warning) 14%,var(--code-background));border-left:3px solid var(--warning)}
+.plabel .w{color:var(--warning)} .plabel .pq{color:color-mix(in srgb,var(--foreground) 96%,var(--code-background))}
+.pbox{border-left:3px solid var(--warning);padding:0 1ch 0 2ch;background:color-mix(in srgb,var(--foreground) 7%,transparent)}
+.closer{overflow:hidden;line-height:1.5;color:color-mix(in srgb,var(--warning) 44%,var(--code-background))}
+.t{--val:#7fc9c0}.pk{color:#8cb6ea}.nm{color:#8cb6ea}
+.fd{color:color-mix(in srgb,var(--foreground) 90%,var(--code-background))}
+.chip{background:color-mix(in srgb,var(--foreground) 17%,var(--code-background));color:#b7bdc8}
+.chip.cur{background:color-mix(in srgb,var(--info) 42%,var(--code-background));color:#d3dbe8;font-weight:700}
+.chip.out{background:color-mix(in srgb,var(--foreground) 6%,var(--code-background));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--foreground) 38%,var(--code-background))}
+.chip.key{background:none;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--foreground) 38%,var(--code-background))}
+.bdg{background:color-mix(in srgb,var(--info) 24%,var(--code-background));color:#b7bdc8}
+.bdg.cur{background:color-mix(in srgb,var(--info) 62%,var(--code-background));color:#1e1f22;font-weight:700}
+.bdg.out{background:color-mix(in srgb,var(--foreground) 16%,var(--code-background))}
+.lay{color:color-mix(in srgb,var(--foreground) 86%,var(--code-background));font-weight:700} .lay .lw{font-weight:400}
+
+.chip{background:#383c45;color:#b7bdc8;font-weight:700}
+.chip.cur{background:color-mix(in srgb,var(--info) 46%,var(--code-background));color:#d3dbe8}
+.chip.solid{background:#73ade9;color:#1e1f22}
+.chip.out{background:#2b2d32;box-shadow:none;color:#acb2be}
+.chip.key{background:#2b2d32;box-shadow:none;font-weight:400;color:#acb2be}
+.gl{color:color-mix(in srgb,var(--foreground) 78%,var(--code-background))} .fd{color:color-mix(in srgb,var(--foreground) 86%,var(--code-background))} .rl{color:color-mix(in srgb,var(--foreground) 55%,var(--code-background))} .bl2{color:var(--info)}
+.num{font-weight:400;color:color-mix(in srgb,var(--foreground) 80%,var(--code-background))} .solid .num{color:#1e1f22}
+
+.num{color:color-mix(in srgb,var(--foreground) 72%,var(--code-background))} .solid .num{color:#1e1f22}
+.bdgn{background:#2b2e35;color:color-mix(in srgb,var(--foreground) 84%,var(--code-background));font-weight:400} .bdgn.solid{background:#5d93cc;color:#1e1f22;font-weight:700}
+.dl{color:color-mix(in srgb,var(--info) 62%,var(--code-background))} .lt{color:#8f97a5}
+.hr{color:color-mix(in srgb,var(--foreground) 72%,var(--code-background))} .rl{color:color-mix(in srgb,var(--foreground) 48%,var(--code-background))}
+
+.num{color:#9aa1ad;font-weight:400} .solid .num{color:#1e1f22;font-weight:400}
+.bdgn{color:#9aa1ad}
+.dl{color:#5f8fc4} .lt{color:#8fa3bd} .hatch{color:#8b93a1;font-weight:400}
+.here{color:#73ade9;font-weight:700} .fd{color:color-mix(in srgb,var(--foreground) 88%,var(--code-background))}
+.chip.fold{background:#2b2e35;font-weight:400;color:color-mix(in srgb,var(--foreground) 86%,var(--code-background))}
+
+.lt{color:#8fa6c4} .hatch{color:#9aa1ad} .chip.fold{background:#383c45;color:#9aa1ad}
+.chip.todo{font-weight:400}
+
+.lens{position:relative;font-family:var(--font-sans),system-ui,sans-serif;line-height:1.25}
+.lens svg.wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.lens .lane{position:absolute;border-radius:.6em;background:rgba(172,178,190,.055);border:1px solid rgba(172,178,190,.07)}
+.lens .lane.outl{background:repeating-linear-gradient(135deg,rgba(172,178,190,.035) 0 6px,rgba(172,178,190,.012) 6px 12px);border:1px dashed #5a606b}
+.lens .ll{position:absolute;font-size:.64em;letter-spacing:.11em;text-transform:uppercase;color:#8b93a1;font-weight:700;white-space:nowrap}
+.lens .ll .lk{font-family:var(--font-mono);letter-spacing:0;text-transform:none;color:#b7bdc8;background:#383c45;border-radius:.3em;padding:.1em .5em;font-size:1.15em;margin-left:.4em}
+.lens .ll .lr{font-weight:400;letter-spacing:.04em;text-transform:none;font-size:1.08em}
+.lens .card{position:absolute;display:flex;align-items:center;gap:.55em;padding:0 .6em;border-radius:.5em;background:#2b2e35;border:1px solid #474d58;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.lens .card .n{flex:0 0 1.55em;height:1.55em;border-radius:.4em;background:rgba(172,178,190,.14);color:#9aa1ad;font-size:.8em;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono)}
+.lens .card .tt{font-family:var(--font-mono);font-weight:700;color:#b7bdc8;font-size:.92em;white-space:nowrap}
+.lens .card .sb{color:#9aa1ad;font-size:.8em;white-space:nowrap;margin-top:.1em}
+.lens .card.here{background:#2c4159;border:1.5px solid #73ade9}
+.lens .card.here .tt{color:#c3d3e6} .lens .card.here .sb{color:#acb9c9} .lens .card.here .n{background:#73ade9;color:#1e1f22;font-weight:700}
+.lens .card.todo{background:transparent;border:1px dashed #5f6672;box-shadow:none} .lens .card.todo .tt{font-weight:400}
+.lens .card.ext{background:#25272b}
+.lens .bgs{position:absolute;right:.6em;top:-.62em;display:flex;gap:.35em}
+.lens .bg{font-size:.58em;letter-spacing:.07em;font-weight:700;padding:.18em .7em;border-radius:1em;border:1px solid;white-space:nowrap;background:#1e1f22}
+.lens .bg.h{background:#73ade9;border-color:#73ade9;color:#1e1f22}
+.lens .bg.c{color:#d9a35c;border-color:rgba(217,163,92,.55);background:#2f2a22}
+.lens .bg.t{color:#9aa1ad;border-color:#555b66}
+.lens .pill{position:absolute;transform:translate(-50%,-50%);font-size:.66em;padding:.1em .65em;border-radius:1em;background:#1e1f22;border:1px solid #3d4148;color:#9aa1ad;white-space:nowrap}
+.lens .pill.bl{color:#8fb3de;border-color:#3f5f85}
+.lens .ah{position:absolute;width:.62em;height:.62em;overflow:visible}
+
+.lens .lane.outl{background:rgba(172,178,190,.03)}
+.lens .ll{font-size:.72em;color:#959dab}
+.lens .card .tt{color:#acb2be;font-size:.95em} .lens .card .sb{font-size:.82em;color:#9ca3af}
+.lens .card.here .tt{color:#b6c5d8} .lens .card.here .sb{color:#a9b6c6}
+.lens .card.ext{background:repeating-linear-gradient(135deg,rgba(172,178,190,.07) 0 5px,rgba(172,178,190,.02) 5px 10px)}
+.lens .bgs{right:.7em;top:-.95em} .lens .chg{margin-left:auto;font-size:.72em;color:#9ca3af;border:1px solid #5f6672;border-radius:1em;padding:.1em .65em;white-space:nowrap;background:rgba(30,31,34,.55)}
+.lens .bg{font-size:.7em;padding:.12em .7em}
+.lens .bg.c{color:#9ca3af;border-color:#5f6672;background:#1e1f22}
+.lens .pill{font-size:.76em}
+.lens .vdiv{position:absolute;border-left:1px dashed #5a606b}
+
+.lens .ll .lr{color:#959dab}
+.lens .card.here .tt{color:#acb2be} .lens .card.here .sb{color:#a3abb8}
+.lens .card.todo{border-color:#7f8794}
+.lens .card.ext{background:linear-gradient(90deg,transparent 0 66%,rgba(0,0,0,0) 66%),repeating-linear-gradient(135deg,rgba(172,178,190,.10) 0 5px,rgba(172,178,190,.02) 5px 10px);background-size:100% 100%,34% 100%;background-position:0 0,100% 0;background-repeat:no-repeat}
+.lens .inr{margin-left:auto;display:flex;gap:.45em;align-items:center}
+.lens .chg{margin-left:0}
+.lens .ftag{font-size:.72em;color:#8b93a1;font-family:var(--font-mono);white-space:nowrap}
+.lens .ah{width:.8em;height:.8em}
+.lens .pill.loop{color:#9ca3af}
+
+.lens .bg.t{border-style:dashed;color:#a3abb8;border-color:#8b93a1}
+.lens .chg.ny{border-style:dashed;border-color:#8b93a1;color:#a3abb8}
+.lens .card.todo .n{color:#a3abb8;background:rgba(172,178,190,.2)}
+.lens .card.bleft .bgs{right:auto;left:.7em}
+.lens .inr.col{flex-direction:column;align-items:flex-end;gap:.25em}
+.lens .chg.rp{border-color:#3f5f85;color:#8fb3de}
+.lens .fsub{font-family:var(--font-mono);font-size:.95em}
+
+.lens .bg.t{font-weight:400;border-width:1.5px;color:#a3abb8}
+.lens .bg.t.bold{font-weight:700}
+.lens .card.todo .n{color:#9ca3af}
+.lens .chg{margin-top:.15em}
+
+.lens .pill.tight{padding:.1em .42em}
+.lens .card.todo{border-width:1.5px}
+.lens .card.todo .n{color:#acb2be}
+.lens .card.ext{background:repeating-linear-gradient(135deg,rgba(172,178,190,.11) 0 5px,rgba(172,178,190,.02) 5px 10px);background-size:18% 100%;background-position:100% 0;background-repeat:no-repeat}
+.lens .bg.t.caps{font-weight:700;color:#acb2be}
+.lens .bg.t.sent{text-transform:none;letter-spacing:.02em;font-weight:400;color:#9ca3af;font-size:.74em}
+
+.lens .card.ext{background-size:18% 50%;background-position:100% 0}
+.lens .bg.t.med{font-weight:600;color:#acb2be}
+.lens .chg.nyi{border-style:dashed;border-color:#8b93a1;color:#acb2be;font-weight:600;letter-spacing:.05em;font-size:.68em}
+.lens .pill.ny{border-style:dashed;border-color:#8b93a1;color:#acb2be}
+.lens .card.todo .sb{color:#a3abb8}
+.lens .card.bmid .bgs{right:auto;left:14.5ch}
+
+.lens .pill{color:#acb2be;font-weight:500}
+.lens .pill.bl{color:#8fb3de}
+.lens .pill.ny{border-width:1.5px;font-weight:600}
+.lens .pill.ny.caps{font-size:.66em;letter-spacing:.06em}
+.lens .card .n{color:#acb2be}
+.lens .ah.hol{width:.98em;height:.98em}
+.lens .pill.tight.nv{padding:.1em .3em}</style></head><body>
+<div class="t"><div class="bb p pre bar"><span class="rt"><span class="dim">hunk 1/3</span></span><span class="b">core.lua</span>  <span class="ok">+4</span> <span class="bad">−3</span>  <span class="dim">working tree</span></div><div class="bb p pre" style="overflow:hidden"><span class="rt gst">lines 213–216</span><span class="cap">TOUR · step 2 of 4</span>  <span class="okd">✓</span> <span class="inf b">●</span> <span class="dim">○ ○</span>  <span class="b">Scans one at a time</span>   Before: every scan at once. Now: one per tick.</div>
+<div class="r band" style="position:relative"><div class="bandbar" style="top:8.25em"></div>
+ <div class="f py"><div class="ln faded"><span class="g">211 </span><span class="s"> </span><span class="c">local queue = {}</span></div>
+<div class="ln faded"><span class="g">212 </span><span class="s"> </span><span class="c">local function drain_scans()</span></div>
+<div class="ln del"><span class="g">213 </span><span class="s">−</span><span class="c">  for _, job in ipairs(queue) do</span></div>
+<div class="ln del"><span class="g">214 </span><span class="s">−</span><span class="c">    spawn(job)</span></div>
+<div class="ln del"><span class="g">215 </span><span class="s">−</span><span class="c">  end</span></div>
+<div class="ln add cur"><span class="g">▶<span class="scope">▏</span>213 </span><span class="s">+</span><span class="c">  local job = table.remove(queue, 1)  <span class="hint"><span class="wrn">≈</span> <span class="nm">job</span> = <span class="hv">&quot;status&quot;</span> <span class="pred">(predicted)</span></span></span></div>
+<div class="ln add"><span class="g"> <span class="scope">▏</span>214 </span><span class="s">+</span><span class="c">  if not job then return end</span></div>
+<div class="ln add"><span class="g"> <span class="scope">▏</span>215 </span><span class="s">+</span><span class="c">  spawn(job)</span></div>
+<div class="ln add"><span class="g"> <span class="scope">▏</span>216 </span><span class="s">+</span><span class="c">  vim.schedule(drain_scans)</span></div>
+<div class="ln faded"><span class="g">217 </span><span class="s"> </span><span class="c">end</span></div>
+<div class="ln faded"><span class="g">218 </span><span class="s"> </span><span class="c"></span></div>
+<div class="ln faded"><span class="g">219 </span><span class="s"> </span><span class="c">local function start_scan(job)</span></div>
+<div class="ln faded"><span class="g">220 </span><span class="s"> </span><span class="c">  queue[#queue + 1] = job</span></div>
+<div class="ln faded"><span class="g">221 </span><span class="s"> </span><span class="c">  if #queue == 1 then</span></div>
+<div class="ln faded"><span class="g">222 </span><span class="s"> </span><span class="c">    vim.schedule(drain_scans)</span></div>
+<div class="ln faded"><span class="g">223 </span><span class="s"> </span><span class="c">  end</span></div>
+<div class="ln faded"><span class="g">224 </span><span class="s"> </span><span class="c">end</span></div>
+<div class="ln faded"><span class="g">225 </span><span class="s"> </span><span class="c"></span></div>
+<div class="ln faded"><span class="g">226 </span><span class="s"> </span><span class="c">function M.refresh(root, opts)</span></div>
+<div class="ln faded"><span class="g">227 </span><span class="s"> </span><span class="c">  opts = opts or {}</span></div>
+<div class="ln faded"><span class="g">228 </span><span class="s"> </span><span class="c">  for _, job in ipairs(plan(root, opts)) do</span></div>
+<div class="ln faded"><span class="g">229 </span><span class="s"> </span><span class="c">    start_scan(job)</span></div>
+<div class="ln faded"><span class="g">230 </span><span class="s"> </span><span class="c">  end</span></div>
+<div class="ln faded"><span class="g">231 </span><span class="s"> </span><span class="c">end</span></div></div><div class="mm" style="flex-basis:1ch"><i style="top:3.75em;height:4.5em;background:var(--destructive)"></i><i style="top:8.25em;height:6.0em;background:var(--success)"></i><i style="top:8.25em;height:1.5em;left:0;right:50%;background:var(--info)"></i></div><div class="bl" style="flex:0 0 45ch;padding-top:3.75em;padding-right:1ch"><div><div class="p pre gst it" style="overflow:hidden">before: start every scan in one go</div><div class="p pre gst" style="overflow:hidden">&nbsp;</div><div class="p pre gst" style="overflow:hidden">&nbsp;</div><div class="p pre b" style="overflow:hidden">take the first job off the queue</div><div class="p pre gst" style="overflow:hidden">nothing left? stop here</div><div class="p pre gst" style="overflow:hidden">start that scan</div><div class="p pre gst" style="overflow:hidden">come back on the next tick</div></div><div>&nbsp;</div><div class="lift"><div class="p fill pre"><span class="b">213 <span class="ok">+</span> added</span><span class="rt"><span class="k">K</span> <span class="dim">more detail</span>  <span class="k">\a</span> <span class="dim">ask</span></span></div><div class="p wrap prose">Removes the first job from <span class="nm">queue</span> and names it <span class="nm">job</span>. Everything behind it moves up one place. If the <span class="nm">queue</span> is empty, <span class="nm">job</span> is nil.</div><div>&nbsp;</div><div class="p pre plabel"><span class="b">IF PAUSED HERE</span><span class="rt"><span class="w">predicted</span><span class="pq"> · not a real run</span></span></div><div class="pbox pre"><span class="pn">After line 213 runs, first time:</span>
+
+<span class="pk">job  </span>    <span class="pv">"status"</span>
+<span class="pk">queue</span>  <span class="pp">{</span> <span class="pv">"show-ref"</span><span class="pp">,</span> <span class="pv">"log"</span> <span class="pp">}</span>
+         <span class="pnote">↳ <span class="hv">"status"</span> was just taken out</span></div></div><div class="pre closer">▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔</div></div></div>
+<div class="bt pre fill" style="padding:0 0 0 1ch"><span class="b">HOW THIS LINE GETS RUN</span> <span class="wrn">≈</span> guess  <span class="gl">…</span> start_scan() <span class="dl">┄</span>later<span class="dl">┄</span> <span class="here">▶ drain_scans() line 213</span> <span class="lt">↻ again at 216</span> <span class="gl">┄</span>not yet<span class="gl">┄▷</span> spawn()<span class="rt"><span class="k">\m</span> map </span></div><div class="bt p pre dim"><span class="k">]t</span> next tour step (3 of 4)   <span class="k">[t</span> previous step   <span class="k">\m</span> full map   <span class="k">\e</span> rail: <span class="sel b"> full </span> gists  off   <span class="k">g?</span> all keys</div></div>
+</body></html>
