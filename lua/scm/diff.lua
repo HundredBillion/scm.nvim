@@ -5,6 +5,7 @@
 local M = {}
 local ns = vim.api.nvim_create_namespace('scm.diff')
 local text_diff = vim.text and vim.text.diff or vim.diff
+local Review = require('scm.review')
 
 -- What each Change Group compares, as the header names it.
 local SOURCES = {changes='diff', staged='staged diff', committed='branch diff'}
@@ -36,14 +37,14 @@ local function lines_of(text)
 end
 
 -- Merge the old and new lines into one list. Returns the lines, what each is
--- ({kind = ' ', '+' or '-', new = its number in the new file}), and the
--- first row of every run of changed lines.
+-- ({kind = ' ', '+' or '-', new = its number in the new file, old = its
+-- number in the old one}), and the first row of every run of changed lines.
 function M.merge(old, new)
   local lines, meta, hunks = {}, {}, {}
   local added, removed = 0, 0
-  local function put(text, kind, number)
+  local function put(text, kind, number, old_number)
     lines[#lines + 1] = text
-    meta[#meta + 1] = {kind=kind, new=number}
+    meta[#meta + 1] = {kind=kind, new=number, old=old_number}
   end
   local a, b = 1, 1
   local changes = {}
@@ -57,12 +58,12 @@ function M.merge(old, new)
     -- A change that removes nothing names the old line it follows.
     local first = count_a > 0 and start_a or start_a + 1
     while a < first do
-      put(new[b], ' ', b)
+      put(new[b], ' ', b, a)
       a, b = a + 1, b + 1
     end
     hunks[#hunks + 1] = {row=#lines + 1, removed=count_a, added=count_b}
     for _ = 1, count_a do
-      put(old[a], '-')
+      put(old[a], '-', nil, a)
       a = a + 1
     end
     for _ = 1, count_b do
@@ -165,11 +166,14 @@ function M.gutter()
   if not view then return '' end
   local width = view.width
   local line = view.meta[vim.v.lnum]
-  if not line or vim.v.virtnum ~= 0 then return (' '):rep(width + 3) end
+  -- A diff with a Tour marks the lines of the step the reader is on.
+  local tour = Review.has_gutter(view)
+  if not line or vim.v.virtnum ~= 0 then return (' '):rep(width + 3 + (tour and 1 or 0)) end
+  local mark = tour and Review.gutter(view, vim.v.lnum, vim.fn.line('.')) or ''
   local number = line.new and ('%' .. width .. 'd'):format(line.new) or (' '):rep(width)
-  if line.kind == '+' then return '%#ScmDiffAddNr# ' .. number .. '%#ScmDiffAddSign#+ ' end
-  if line.kind == '-' then return '%#ScmDiffDeleteNr# ' .. number .. '%#ScmDiffDeleteSign#- ' end
-  return '%#LineNr# ' .. number .. '  '
+  if line.kind == '+' then return mark .. '%#ScmDiffAddNr# ' .. number .. '%#ScmDiffAddSign#+ ' end
+  if line.kind == '-' then return mark .. '%#ScmDiffDeleteNr# ' .. number .. '%#ScmDiffDeleteSign#- ' end
+  return mark .. '%#LineNr# ' .. number .. '  '
 end
 
 -- The header above the diff: the file, what it is compared against, how many
@@ -183,6 +187,14 @@ function M.header()
   local counts = ''
   if view.stats and view.stats.added + view.stats.removed > 0 then
     counts = '%#ScmDiffAddSign# +' .. view.stats.added .. ' %#ScmDiffDeleteSign# -' .. view.stats.removed .. ' '
+  end
+  -- Which change the cursor is in or has just passed.
+  if #view.hunks > 0 then
+    local row, at = vim.fn.line('.'), 1
+    for i, hunk in ipairs(view.hunks) do
+      if hunk.row <= row then at = i end
+    end
+    counts = counts .. '%#ScmDiffSource# change ' .. at .. '/' .. #view.hunks .. ' '
   end
   local function button(id, label)
     return '%' .. id .. '@v:lua.ScmDiffClick@%#ScmDiffButton# ' .. label .. ' %X'
@@ -509,8 +521,10 @@ local function create(spec, name)
   }) do
     vim.keymap.set('n', key, run, {buffer=buf, nowait=true})
   end
+  Review.keys(buf)
   vim.api.nvim_create_autocmd('BufWipeout', {buffer=buf, once=true, callback=function()
     views[buf], by_name[name] = nil, nil
+    Review.detach(view)
   end})
   return view
 end
@@ -555,6 +569,7 @@ function M.open(spec, done)
       vim.api.nvim_win_call(win, function() vim.cmd('normal! zz') end)
     end
     rulers_sync()
+    Review.attach(view)
     if done then done(view.buf) end
   end)
 end
@@ -577,6 +592,7 @@ function M.reload()
         vim.api.nvim_win_call(win, function() vim.fn.winrestview(place) end)
       end
       rulers_sync()
+      Review.attach(view)
     end)
   end
 end
@@ -591,8 +607,10 @@ function M.is_diff(buf)
   return views[buf] ~= nil
 end
 
-function M.setup()
+-- `opts` are SCM's options; `opts.review` sets up the Review of a diff.
+function M.setup(opts)
   M.highlights()
+  Review.setup((opts or {}).review, function(buf) return views[buf] end)
   local group = vim.api.nvim_create_augroup('ScmDiff', {clear=true})
   vim.api.nvim_create_autocmd('ColorScheme', {group=group, callback=M.highlights})
   vim.api.nvim_create_autocmd({'BufWinEnter', 'BufEnter'}, {group=group, callback=function()

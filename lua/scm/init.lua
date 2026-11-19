@@ -26,4 +26,9 @@ function M.toggle() return current().toggle() end
 -- False when the Panel is closed.
 function M.act(name) return current().act(name) end
 function M.handoff(fn) return current().handoff(fn) end
+-- Open the admin page: the services that explain changes, and which is in use.
+function M.explainers()
+  current()
+  return require('scm.review.admin').open()
+end
 return M

@@ -1,0 +1,402 @@
+-- A Review explains a diff: a Tour through its changes, a few words beside
+-- each changed line, predicted values, and a Flow Map of how a line gets run.
+vim.env.XDG_CACHE_HOME, vim.env.XDG_DATA_HOME = vim.fn.tempname(), vim.fn.tempname()
+vim.opt.runtimepath:prepend(vim.uv.cwd())
+local Schema = require('scm.review.schema')
+local Flow = require('scm.review.flow')
+local Rail = require('scm.review.rail')
+local Prompt = require('scm.review.prompt')
+local Explainers = require('scm.review.explainers')
+
+local function answer()
+  return {
+    tour={
+      {title='Start the queue once', summary='Only the first scan wakes the queue.', from=9, to=9},
+      {title='Scans one at a time', summary='Before: every scan at once. Now: one per tick.', from=3, to=6},
+    },
+    lines={
+      {side='old', line=3, gist='before: start every scan in one go'},
+      {side='new', line=3, gist='take the first job off the queue',
+        detail='Removes the first job from queue and names it job. If the queue is empty, job is nil.',
+        inline='job = "status"',
+        paused={when='After line 3 runs, first time:', values={
+          {name='job', value='"status"'}, {name='queue', value='{ "log" }', note='"status" was just taken out'}}}},
+      {side='new', line=4, gist='nothing left? stop here'},
+      {side='new', line=6, gist='come back on the next tick'},
+    },
+    flows={{from=3, to=6, note='repeats until the queue is empty', trigger={says='you press', keys='Space g s'},
+      later='when Neovim is free', handoff='Neovim runs it later', outside='Outside Neovim',
+      steps={
+        {name='open()', says='opens the Panel', file='workspace.lua', when='now', state='ran'},
+        {name='refresh()', says='plans the scans to run', when='now', state='ran'},
+        {name='start_scan()', says='adds a scan to the queue', when='now', state='ran'},
+        {name='drain_scans()', says='one scan at a time', when='later', state='here', changed=true, again=6, line=3},
+        {name='spawn()', says='will start git status', when='later', state='not_yet'},
+        {name='git status', says="this tool can't see inside", when='outside', state='not_yet'},
+      }}},
+  }
+end
+
+-- What an Explainer sends is checked, cut to size and put in order.
+local review = assert(Schema.normalise(answer()))
+assert(#review.tour == 2 and review.tour[1].from == 3, 'the tour is put in the order of the file')
+assert(review.lines.old[3].gist:find('^before') and review.lines.new[3].paused.values[2].note, 'notes are kept by side and line')
+assert(Schema.step_at(review, 5) == 1 and Schema.step_at(review, 9) == 2 and not Schema.step_at(review, 7), 'a line finds its step')
+assert(Schema.flow_at(review, 4) == review.flows[1] and not Schema.flow_at(review, 9), 'a line finds its flow map')
+local long = answer()
+long.lines[2].gist = ('word '):rep(40)
+long.lines[3].gist = 'two\nlines\tof it'
+long.lines[4] = {side='new', line='six', gist='no number'}
+long.tour[1].from = -4
+long.flows[1].steps[2].when = 'never'
+long.flows[1].steps[5].state = 'here'
+local cut = assert(Schema.normalise(long))
+assert(vim.fn.strchars(cut.lines.new[3].gist) == Schema.LIMITS.gist, 'a long gist is cut to the room the rail has')
+assert(cut.lines.new[4].gist == 'two lines of it', 'a gist is one line')
+assert(not cut.lines.new[6] and #cut.tour == 1, 'what does not name a line is dropped')
+assert(cut.flows[1].steps[2].lane == 1, 'a step with no time keeps the time of the step before it')
+assert(cut.flows[1].steps[5].state == 'not_yet', 'only one step is where the reader is')
+assert(not Schema.normalise({tour={}, lines={}}) and not Schema.normalise('text'), 'an answer that explains nothing is refused')
+local raw = Schema.decode('Here you are:\n```json\n{"tour": [], "lines": [{"line": 1, "gist": "x"}]}\n```')
+assert(raw and raw.lines[1].gist == 'x', 'the JSON is found inside what a model wraps it in')
+assert(not Schema.decode('no braces here') and not Schema.decode('{broken'), 'an answer with no JSON is refused')
+local backwards = answer()
+backwards.flows[1].steps[5].when = 'now'
+assert(Schema.normalise(backwards).flows[1].steps[5].lane == 2, 'time never runs backwards in a flow map')
+
+-- The flow map: where each step sits and what joins them.
+local flow = review.flows[1]
+local cards, lanes = Flow.place(flow)
+assert(#lanes == 3 and lanes[1].cols == 2, 'steps are grouped into lanes of time')
+assert(cards[1].row == 1 and cards[2].row == 1 and cards[3].row == 2 and cards[3].col == 2, 'the last step of a lane drops under the one before')
+assert(cards[6].row == 2, 'a lane\'s only step stays on the row of the step that leads to it')
+local kinds = vim.tbl_map(function(edge) return edge.kind end, Flow.edges(flow))
+assert(vim.deep_equal(kinds, {'calls', 'calls', 'later', 'not_yet', 'not_yet'}), 'each join says what it is: ' .. table.concat(kinds, ','))
+local staircase = table.concat(vim.tbl_map(function(row)
+  return table.concat(vim.tbl_map(function(piece) return piece[1] end, row))
+end, Flow.text(flow, 3)), '\n')
+assert(staircase:find('1 open()', 1, true) and staircase:find('you are here · line 3', 1, true)
+  and staircase:find('later · when Neovim is free', 1, true) and staircase:find('OUTSIDE NEOVIM', 1, true)
+  and staircase:find('again at line 6', 1, true), 'the map drawn with characters:\n' .. staircase)
+local brief = table.concat(vim.tbl_map(function(piece) return piece[1] end, Flow.brief(flow, 3)))
+assert(brief:find('start_scan()', 1, true) and brief:find('drain_scans() line 3', 1, true) and brief:find('spawn()', 1, true), 'the map on one row: ' .. brief)
+assert(Flow.caption(flow, 'core.lua') == 'guess · first run shown · repeats until the queue is empty · in core.lua unless tagged', 'the heading says the map is a guess')
+
+-- The map as a picture.
+local svg, height = require('scm.review.flowsvg').svg(flow, {width=1400, file='core.lua', line=3, hints={{']t', true}, {' next'}}})
+assert(svg:find('^<svg ') and svg:find('</svg>$') and height > 200, 'the picture is one SVG')
+for _, text in ipairs({'drain_scans()', 'YOU ARE HERE · LINE 3', 'Neovim runs it later', 'not yet called', '↻ again · line 6', 'OUTSIDE NEOVIM', 'HOW THIS LINE GETS RUN'}) do
+  assert(svg:find(text, 1, true), 'the picture says "' .. text .. '"')
+end
+assert(not svg:lower():find('#fff') and not svg:lower():find('white'), 'no text in the picture is white')
+local narrow = require('scm.review.flowsvg').svg(flow, {width=600})
+assert(narrow:match('width="(%d+)') == '600', 'a narrow strip scales the picture down to fit')
+local tricky = vim.deepcopy(flow)
+tricky.steps[1].name = 'a<b>&"c"'
+assert(require('scm.review.flowsvg').svg(tricky, {}):find('a&lt;b&gt;&amp;&quot;c&quot;', 1, true), 'names are escaped')
+
+-- The rail: a few words beside each line, and a block about the reader's line.
+local meta = {
+  {kind=' ', new=1, old=1}, {kind=' ', new=2, old=2}, {kind='-', old=3}, {kind='-', old=4},
+  {kind='+', new=3}, {kind='+', new=4}, {kind='+', new=5}, {kind='+', new=6},
+  {kind=' ', new=7, old=5}, {kind=' ', new=8, old=6},
+}
+for i = 9, 30 do meta[#meta + 1] = {kind=' ', new=i, old=i - 2} end
+local function text_of(pieces) return table.concat(vim.tbl_map(function(piece) return piece[1] end, pieces)) end
+local rows = Rail.rows(review, meta, 5, 46, 'full')
+assert(text_of(rows[3]):find('before: start every scan', 1, true), 'a removed line has its note from the old file')
+assert(text_of(rows[5]):find('take the first job off the queue', 1, true) and rows[5][1][2] == 'ScmReviewGistCurrent', 'the reader\'s line stands out')
+assert(not rows[7], 'a line with no note is left empty')
+for row, pieces in pairs(rows) do
+  assert(vim.fn.strdisplaywidth(text_of(pieces)) == 46, 'row ' .. row .. ' of the rail is exactly its width: ' .. text_of(pieces))
+end
+assert(text_of(rows[10]):find('3 + added', 1, true) and text_of(rows[10]):find('K more detail', 1, true), 'the block starts under the change')
+local block = table.concat(vim.tbl_map(text_of, Rail.block(review.lines.new[3], meta[5], 46)), '\n')
+assert(block:find('IF PAUSED HERE  predicted · not a real run', 1, true), 'predicted values are labelled as predicted')
+assert(block:find('queue  { "log" }', 1, true) and block:find('↳ "status" was just taken out', 1, true), 'the values line up:\n' .. block)
+assert(not Rail.rows(review, meta, 5, 46, 'gists')[10], 'the gists mode shows no block')
+assert(#Rail.block(review.lines.new[4], meta[6], 46) == 0, 'a note with nothing more to say has no block')
+assert(Rail.width_in(70) == nil and Rail.width_in(120) == 46, 'a narrow window has no rail')
+assert(vim.deep_equal(Rail.wrap('one two three four', 9), {'one two', 'three', 'four'}), 'prose wraps at spaces')
+
+-- What is asked, and where answers are kept.
+local numbered = Prompt.numbered({'a', 'old', 'new', 'z'}, {{kind=' ', new=1, old=1}, {kind='-', old=2}, {kind='+', new=2}, {kind=' ', new=3, old=3}},
+  {{row=2, removed=1, added=1}})
+assert(numbered == '      1 | a\n-     2 | old\n+     2 | new\n      3 | z', 'each line carries its kind and number:\n' .. numbered)
+assert(not Prompt.numbered({'a'}, {{kind=' ', new=1}}, {}), 'nothing changed, nothing to ask')
+local question = Prompt.build('lua/core.lua', numbered, true)
+assert(question:find('File: lua/core.lua', 1, true) and question:find('"flows"', 1, true) and question:find('PREDICTION', 1, true)
+  and question:find('You may read other files', 1, true), 'the question names the file, the shape and the rules')
+assert(not Prompt.build('x', numbered, false):find('You may read other files', 1, true), 'a service that cannot read files is not told to')
+local key = Prompt.key('a.lua', 'old', 'new')
+assert(key == Prompt.key('a.lua', 'old', 'new') and key ~= Prompt.key('a.lua', 'old', 'newer') and key ~= Prompt.key('b.lua', 'old', 'new'), 'a change has one name')
+assert(Prompt.kept(key) == nil, 'nothing is kept at first')
+Prompt.keep(key, answer())
+assert(Prompt.kept(key).tour[1].title == 'Start the queue once', 'an answer is kept')
+Prompt.forget(key)
+assert(Prompt.kept(key) == nil, 'and forgotten')
+
+-- The Explainers: Claude Code first, any service added, no key kept.
+Explainers.setup({})
+assert(Explainers.active().kind == 'claude_code' and #Explainers.list() == 1, 'Claude Code is the Explainer SCM starts with')
+local kept, why = Explainers.put({name='Local', kind='openai', url='http://localhost:11434/v1', model='llama', key='SECRET', key_env='LOCAL_KEY'})
+assert(kept and kept.key == nil and kept.key_env == 'LOCAL_KEY', 'a key is never kept, only where to find it')
+assert(not Explainers.put({name='Bad', kind='telepathy'}) and not Explainers.put({kind='openai'}), 'a service needs a name and a known kind')
+assert(Explainers.use('Local') and Explainers.active().name == 'Local' and not Explainers.use('Nobody'), 'a service is chosen by name')
+local saved = io.open(vim.fn.stdpath('data') .. '/scm/explainers.json'):read('*a')
+assert(saved:find('Local', 1, true) and not saved:find('SECRET', 1, true), 'what is saved holds no key')
+Explainers.setup({})
+assert(Explainers.active().name == 'Local' and #Explainers.list() == 2, 'services and the choice are remembered')
+assert(Explainers.remove('Local') and Explainers.active().name == 'Claude Code', 'removing the service in use falls back')
+kept, why = Explainers.remove('Claude Code')
+assert(not kept and why:find('at least one'), 'the last service is kept')
+Explainers.setup({use='Mine', services={{name='Mine', kind='command', command='cat'}}})
+assert(Explainers.get('Mine').fixed and Explainers.active().name == 'Claude Code', 'services can be set in the configuration; the choice made on the admin page stays')
+assert(Explainers.use('Mine') and Explainers.active().name == 'Mine', 'and are chosen like any other')
+kept, why = Explainers.put({name='Mine', kind='command', command='rm'})
+assert(not kept and why:find('configuration'), 'and those are not changed from the admin page')
+local function ask(service, prompt)
+  local err, out, done
+  Explainers.ask(service, prompt, {cwd=vim.uv.cwd()}, function(e, o) err, out, done = e, o, true end)
+  assert(vim.wait(10000, function() return done end, 10), 'the service answers')
+  return err, out
+end
+local err, out = ask(Explainers.get('Mine'), 'hello there')
+assert(not err and vim.trim(out) == 'hello there', 'a command is sent the question on its standard input')
+err = ask({name='Broken', kind='command', command='echo nope >&2; exit 3'}, 'x')
+assert(err == 'nope', 'a failing command says why: ' .. tostring(err))
+err = ask({name='Keyless', kind='anthropic', key_env='SCM_TEST_NO_SUCH_KEY'}, 'x')
+assert(err:find('SCM_TEST_NO_SUCH_KEY', 1, true), 'a service with no key says which variable is missing')
+err = ask({name='Gone', kind='claude_code', command='scm-no-such-program'}, 'x')
+assert(err and err:find('scm%-no%-such%-program'), 'a missing program is named: ' .. tostring(err))
+-- A stand-in for Claude Code: it prints the JSON the real one prints.
+local fake = vim.fn.tempname()
+local handle = io.open(fake, 'w')
+handle:write('#!/bin/sh\ncat > "$0.asked"\necho "$@" > "$0.args"\nprintf \'%s\' \'{"is_error": false, "result": "the answer"}\'\n')
+handle:close()
+vim.uv.fs_chmod(fake, 493)
+err, out = ask({name='Fake', kind='claude_code', command=fake, model='some-model'}, 'the question')
+assert(not err and out == 'the answer', 'Claude Code\'s answer is read from its result')
+assert(io.open(fake .. '.asked'):read('*a') == 'the question', 'and it is asked on its standard input')
+local args = io.open(fake .. '.args'):read('*a')
+assert(args:find('--tools Read,Grep,Glob', 1, true) and args:find('--model some-model', 1, true) and args:find('-p', 1, true), 'it may only read: ' .. args)
+assert(args:find('--setting-sources user', 1, true) and args:find('--strict-mcp-config', 1, true), 'and the repository it reads cannot configure it: ' .. args)
+-- A stand-in for curl: it keeps what it was told and answers as the service would.
+local bin = vim.fn.tempname()
+vim.fn.mkdir(bin, 'p')
+handle = io.open(bin .. '/curl', 'w')
+handle:write('#!/bin/sh\necho "$@" > "' .. bin .. '/args"\ncat > "' .. bin .. '/config"\nprintf \'%s\' \'{"content":[{"type":"text","text":"from the API"}],"stop_reason":"end_turn"}\'\n')
+handle:close()
+vim.uv.fs_chmod(bin .. '/curl', 493)
+local path = vim.env.PATH
+vim.env.PATH = bin .. ':' .. path
+err, out = ask({name='API', kind='anthropic', key_cmd='printf "sk-first-line\\nurl = https://elsewhere.invalid\\n"'}, 'the question')
+vim.env.PATH = path
+assert(not err and out == 'from the API', 'the Claude API\'s answer is read from its text: ' .. tostring(err))
+local config = io.open(bin .. '/config'):read('*a')
+assert(config:find('header = "x-api-key: sk-first-line"', 1, true) and not config:find('elsewhere', 1, true), 'a key is its first line, and nothing after it reaches curl:\n' .. config)
+assert(config:find('url = "https://api.anthropic.com/v1/messages"', 1, true) and config:find('anthropic-version: 2026-10-21', 1, true), 'the request goes where the service is')
+assert(not io.open(bin .. '/args'):read('*a'):find('sk-first-line', 1, true), 'the key is not among the arguments other programs can see')
+-- A question can be taken back.
+local answered = false
+local cancel = Explainers.ask({name='Slow', kind='command', command='sleep 30; echo late'}, 'x', {}, function() answered = true end)
+vim.wait(200)
+cancel()
+vim.wait(300)
+assert(not answered and vim.trim(vim.fn.system('pgrep -f "sleep 30; echo late" || true')) == '', 'a question taken back stops the service and is never answered')
+
+-- A diff with a Review kept for it.
+local root = vim.fn.tempname()
+vim.fn.mkdir(root, 'p')
+local function git(...) assert(vim.system({'git', '-C', root, ...}):wait().code == 0, 'git ' .. table.concat({...}, ' ')) end
+local function write(lines)
+  local file = assert(io.open(root .. '/core.lua', 'w'))
+  file:write(table.concat(lines, '\n') .. '\n')
+  file:close()
+end
+local tail = {'end', 'local function start_scan(job)', '  queue[#queue + 1] = job', '  if #queue == 1 then vim.schedule(drain_scans) end', 'end'}
+for i = 1, 30 do tail[#tail + 1] = '-- ' .. i end
+local old = vim.list_extend({'local queue = {}', 'local function drain_scans()', '  for _, job in ipairs(queue) do spawn(job) end', '  queue = {}'}, tail)
+local new = vim.list_extend({'local queue = {}', 'local function drain_scans()', '  local job = table.remove(queue, 1)', '  if not job then return end', '  spawn(job)', '  vim.schedule(drain_scans)'}, tail)
+git('init', '-q', '-b', 'main')
+git('config', 'user.email', 'scm@example.invalid')
+git('config', 'user.name', 'SCM Test')
+write(old)
+git('add', '-A')
+git('commit', '-q', '-m', 'one')
+write(new)
+local fake_review = vim.fn.tempname()
+handle = io.open(fake_review, 'w')
+handle:write('#!/bin/sh\ncat > /dev/null\ncat "$0.json"\n')
+handle:close()
+vim.uv.fs_chmod(fake_review, 493)
+handle = io.open(fake_review .. '.json', 'w')
+handle:write('Here is the review.\n' .. vim.json.encode(answer()))
+handle:close()
+-- A script's screen is 80 cells wide, so the rail is let into less room than it asks for.
+Rail.MIN_CODE = 20
+local diff = require('scm.diff')
+require('scm').setup({renderer='terminal', review={explainer='Stand-in', explainers={{name='Stand-in', kind='command', command=fake_review}}}})
+Explainers.use('Stand-in')
+local Review = require('scm.review')
+local window = vim.api.nvim_get_current_win()
+local function show()
+  local shown
+  diff.open({repo=root, path='core.lua', file=root .. '/core.lua', group='changes'}, function(buf) shown = buf end)
+  assert(vim.wait(5000, function() return shown end, 10), 'the diff appears')
+  return shown
+end
+local function floats()
+  return vim.tbl_filter(function(win) return vim.api.nvim_win_get_config(win).relative ~= '' end, vim.api.nvim_tabpage_list_wins(0))
+end
+local function bar_text()
+  for _, win in ipairs(floats()) do
+    local line = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, 1, false)[1] or ''
+    if vim.api.nvim_win_get_height(win) == 1 and vim.api.nvim_win_get_width(win) > 20 then return line end
+  end
+end
+local buf = show()
+assert(bar_text():find('\\e explain this change with Stand-in', 1, true), 'a diff with no Review says how to get one: ' .. tostring(bar_text()))
+assert(not require('scm.review.strip').window(), 'and has no strip under it')
+assert(vim.fn.maparg('\\e', 'n', false, true).buffer == 1 and vim.fn.maparg(']t', 'n', false, true).buffer == 1, 'the keys are bound in the diff')
+-- Asking: nothing is sent until the reader asks.
+Review.rail()
+assert(bar_text():find('Stand-in is reading this change', 1, true), 'the bar says who is reading: ' .. bar_text())
+assert(vim.wait(10000, function() return bar_text():find('TOUR', 1, true) ~= nil end, 10), 'the Review arrives: ' .. bar_text())
+assert(bar_text():find('step 1 of 2', 1, true) and bar_text():find('Scans one at a time', 1, true)
+  and bar_text():find('lines 3–6', 1, true), 'the bar shows the step the cursor is in: ' .. bar_text())
+local strip = require('scm.review.strip').window()
+assert(strip and vim.api.nvim_win_get_height(strip) == 1, 'a short editor shows one row of the flow map under the diff')
+Review.map()
+strip = require('scm.review.strip').window()
+assert(strip and vim.api.nvim_win_get_height(strip) > 5, 'and \\m opens the whole map')
+local strip_text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(strip), 0, -1, false), '\n')
+assert(strip_text:find('drain_scans()', 1, true) and strip_text:find(']t next tour step (2 of 2)', 1, true), 'with the keys under it:\n' .. strip_text)
+assert(vim.wo[strip].winbar:find('HOW THIS LINE GETS RUN', 1, true) and vim.wo[strip].winfixwidth, 'and its heading above')
+assert(Review.step(1) and vim.api.nvim_win_get_cursor(window)[1] == 11, ']t goes to the next step, at row ' .. vim.api.nvim_win_get_cursor(window)[1])
+assert(bar_text():find('step 2 of 2  ✓ ●', 1, true), 'the step left behind is ticked: ' .. bar_text())
+assert(Review.step(1) and vim.api.nvim_win_get_cursor(window)[1] == 5, 'and wraps to the first')
+assert(Review.step(-1) and vim.api.nvim_win_get_cursor(window)[1] == 11, '[t goes back')
+Review.step(1)
+-- The map folds to one row, which leaves the diff the room.
+Review.map()
+strip = require('scm.review.strip').window()
+assert(vim.api.nvim_win_get_height(strip) == 1 and vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(strip), 0, 1, false)[1]:find('\\m map', 1, true), 'the map folds to one row')
+-- The screen: the rail beside the code, the marks in the gutter.
+vim.cmd('doautocmd CursorMoved')
+vim.cmd('redraw')
+local function screen_row(row)
+  local text = ''
+  for col = 1, vim.o.columns do text = text .. vim.fn.screenstring(row, col) end
+  return text
+end
+local screen = {}
+for row = 1, vim.o.lines do screen[row] = screen_row(row) end
+local all = table.concat(screen, '\n')
+assert(all:find('take the first job off the queue', 1, true) and all:find('before: start every scan', 1, true), 'gists are drawn beside the code:\n' .. all)
+assert(all:find('IF PAUSED HERE  predicted · not a real run', 1, true), 'the predicted values are drawn')
+assert(all:find('▶  3+', 1, true) and all:find('▏  4+', 1, true), 'the gutter marks the step')
+assert(vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == 'local queue = {}', 'none of it is text in the buffer')
+vim.api.nvim_win_set_cursor(window, {1, 0})
+vim.cmd('doautocmd CursorMoved')
+vim.cmd('redraw')
+assert(screen_row(3):find('1  local queue = {}', 1, true), 'line 1 is not hidden under the bar: ' .. screen_row(3))
+-- Less in the rail, and none.
+vim.api.nvim_win_set_cursor(window, {5, 0})
+Review.rail()
+vim.cmd('redraw')
+all = ''
+for row = 1, vim.o.lines do all = all .. screen_row(row) .. '\n' end
+assert(Review.mode() == 'gists' and all:find('take the first job', 1, true) and not all:find('IF PAUSED HERE', 1, true), 'gists alone')
+Review.rail()
+vim.cmd('redraw')
+all = ''
+for row = 1, vim.o.lines do all = all .. screen_row(row) .. '\n' end
+assert(Review.mode() == 'off' and not all:find('take the first job', 1, true), 'and no rail')
+assert(all:find('≈ job = "status" (predicted)', 1, true), 'the predicted value follows the reader\'s line')
+Review.rail()
+assert(Review.mode() == 'full', 'and back')
+-- The Review is kept: the next time nothing is asked.
+os.remove(fake_review .. '.json')
+vim.cmd('enew')
+assert(#floats() == 0 and not require('scm.review.strip').window(), 'leaving the diff takes the bar and the strip away')
+show()
+assert(bar_text():find('TOUR', 1, true), 'a kept Review is shown at once: ' .. bar_text())
+-- A change to the file is a different change.
+table.insert(new, 5, '  -- one more line')
+write(new)
+diff.reload()
+assert(vim.wait(5000, function() return bar_text() and bar_text():find('explain this change', 1, true) ~= nil end, 10), 'an edited file has no Review yet: ' .. tostring(bar_text()))
+Review.rail()
+assert(vim.wait(10000, function() return bar_text():find('Could not explain', 1, true) ~= nil end, 10), 'a failure is said in the bar: ' .. bar_text())
+-- The admin page.
+require('scm').explainers()
+local page = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+assert(page:find('● Stand-in', 1, true) and page:find('○ Claude Code', 1, true) and page:find('A key is never kept here', 1, true), 'the admin page lists the services:\n' .. page)
+vim.cmd('normal! gg')
+vim.fn.search('Claude Code')
+require('scm.review.admin').use()
+assert(Explainers.active().name == 'Claude Code', 'Enter chooses the service under the cursor')
+assert(vim.fn.exists(':ScmExplainers') == 2, 'and there is a command for the page')
+vim.api.nvim_win_close(0, true)
+-- In a Sprite Terminal with a dock under the editor, the map is a picture.
+local opened, updates, closed = {}, {}, 0
+package.loaded['sprite'] = {open=function(opts, done)
+  opened[#opened + 1] = opts
+  if opts.refuse then return end
+  vim.schedule(function()
+    if DOCK_ERROR then done(DOCK_ERROR); return end
+    done(nil, {update=function(_, description, cb) updates[#updates + 1] = description; cb() end,
+      close=function() closed = closed + 1 end, focus_editor=function() end})
+  end)
+end}
+require('scm').setup({renderer='terminal', review={explainer='Stand-in', explainers={{name='Stand-in', kind='command', command=fake_review}}}})
+Prompt.keep(Prompt.key('core.lua', table.concat(old, '\n') .. '\n', table.concat(new, '\n') .. '\n'), answer())
+vim.cmd('enew')
+show()
+vim.api.nvim_win_set_cursor(window, {5, 0})
+-- The map was left folded to one row above.
+Review.map()
+assert(vim.wait(2000, function() return #updates > 0 end, 10), 'the picture is sent to the dock')
+assert(opened[1].side == 'bottom' and opened[1].height > 100, 'the dock is asked for under the editor')
+local image = updates[#updates].root.children[1]
+assert(image.kind == 'image' and image.svg:find('drain_scans()', 1, true) and image.svg:find('YOU ARE HERE · LINE 3', 1, true), 'the picture is the flow map')
+assert(not require('scm.review.strip').window() and require('scm.review.strip').docked(), 'and no window of characters is shown with it')
+-- The dock takes rows from the editor; that must not make the editor "short" and fold the map away again.
+local lines_before = vim.o.lines
+vim.o.lines = 20
+assert(not require('scm.review.strip').short(), 'an editor made shorter by the dock keeps the dock')
+vim.o.lines = lines_before
+local sent = #updates
+opened[1].on_event({type='resize', width=900, height=252})
+assert(vim.wait(2000, function() return #opened == 2 and #updates > sent end, 10), 'a dock of another width is opened again to fit its picture')
+assert(closed == 1 and opened[2].height < opened[1].height, 'at the height the narrower picture needs: ' .. opened[2].height)
+sent = #updates
+opened[2].on_event({type='resize', width=900, height=opened[2].height})
+Review.sync()
+vim.wait(100)
+assert(#updates == sent and #opened == 2, 'the same picture is not sent twice, and the dock is not opened a third time')
+Review.map()
+assert(closed == 2 and require('scm.review.strip').window(), 'one row of the map is characters, and the dock is given back')
+Review.map()
+-- A host with no such dock gets characters.
+DOCK_ERROR = {code='unsupported'}
+require('scm').setup({renderer='terminal', review={explainer='Stand-in', explainers={{name='Stand-in', kind='command', command=fake_review}}}})
+vim.cmd('enew')
+show()
+assert(vim.wait(2000, function() return require('scm.review.strip').window() ~= nil end, 10), 'a host without the dock gets the map in characters')
+package.loaded['sprite'] = nil
+-- A step that names a line the file does not have is left out of the tour.
+local far = answer()
+far.tour[#far.tour + 1] = {title='Nowhere', from=5000, to=5001}
+Prompt.keep(Prompt.key('core.lua', table.concat(old, '\n') .. '\n', table.concat(new, '\n') .. '\n'), far)
+vim.cmd('enew')
+show()
+assert(bar_text():find('of 2', 1, true) and not bar_text():find('of 3', 1, true), 'the tour holds only steps that can be walked to: ' .. bar_text())
+assert(pcall(require('scm').setup, {renderer='terminal', review=true}), 'review = true means on')
+-- Turned off.
+require('scm').setup({renderer='terminal', review=false})
+show()
+assert(#floats() <= 1 and not require('scm.review.strip').window(), 'with review off a diff is as it was')
+assert(vim.fn.maparg('\\e', 'n', false, true).buffer ~= 1 and vim.fn.exists(':ScmExplainers') == 0, 'its keys and its command are gone')
+print('OK review: a diff explains itself')

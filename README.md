@@ -114,7 +114,7 @@ lines were added, red where they were removed, and a lighter band for the
 part on screen.
 
 The header names the file and what it is compared with, counts added and
-removed lines, and has buttons for the previous and next change and for
+removed lines, says which change the cursor is in, and has buttons for the previous and next change and for
 opening the file.
 
 | Key in a diff | Action |
@@ -129,6 +129,84 @@ groups `ScmDiffAdd`, `ScmDiffDelete`, `ScmDiffAddText` and
 strip, mixed from VS Code's diff colours and your colour
 scheme's background.
 
+## Reading a diff to learn from it
+
+A diff can explain itself. Press `\e` in a diff and an Explainer, by default
+the Claude Code CLI on your machine, reads the change and writes a Review of
+it. Nothing is sent anywhere until you press that key. The Review is kept, so
+the same change is explained once.
+
+A Review adds four things around the diff:
+
+- **A Tour.** The bar under the header names the step you are on, with a
+  title and one sentence about it. `]t` and `[t` move between steps, and the
+  gutter marks the lines of the current one.
+- **The Rail.** A column at the right says in a few words what each changed
+  line does. Under the change you are in, it adds a paragraph about the line
+  under the cursor.
+- **If paused here.** For a line that sets a value, the Rail shows what the
+  values would be just after that line ran. These are the Explainer's
+  prediction and are always labelled "predicted"; they are not recorded from
+  a real run.
+- **How this line gets run.** A strip under the diff maps the calls that
+  lead to the line: what runs right away, what the program runs later, and
+  what happens outside it. In a Sprite Terminal with a bottom dock the map is
+  drawn as a picture; in any other terminal it is drawn with characters. A
+  short window shows one row of it.
+
+| Key in a diff | Action |
+| --- | --- |
+| `\e` | Explain this change; after that, show more or less in the Rail (full, gists, off). |
+| `]t` / `[t` | Next / previous step of the Tour. |
+| `K` | More about the line under the cursor. |
+| `\a` | Ask a question about the line under the cursor. |
+| `\m` | Show the whole map, or one row of it. |
+| `\R` | Explain this change again. |
+| `\s` | Open the admin page. |
+| `g?` | List these keys. |
+
+### Choosing who explains
+
+`:ScmExplainers`, `\s` in a diff, or "Explainers…" in the Panel's menu opens
+the admin page. It lists the services that can explain a change and marks the
+one in use. From there you can add a service, edit it, remove it, test that
+it answers, and choose it.
+
+| Kind | Asks |
+| --- | --- |
+| Claude Code on this machine | The `claude` command, which may read the repository but not change it. The default. |
+| Claude API | Anthropic's Messages API. |
+| OpenAI-compatible API | Any service with a chat completions endpoint, such as OpenAI, OpenRouter, Ollama or LM Studio. |
+| A command of your own | Any command that reads the question on standard input and prints the answer. |
+
+A key is never stored. A service names the environment variable that holds
+its key (`key_env`) or a command that prints it (`key_cmd`), such as a
+password manager's. Services can also be set in your configuration:
+
+```lua
+opts = {
+  review = {
+    explainer = "Local",
+    explainers = {
+      { name = "Local", kind = "openai", url = "http://localhost:11434/v1", model = "qwen2.5-coder" },
+    },
+  },
+}
+```
+
+| `review` option | Default | Meaning |
+| --- | --- | --- |
+| `auto` | `false` | Ask for a Review as soon as a diff opens, without `\e`. |
+| `explainer` | `"Claude Code"` | The service used until you choose another on the admin page. |
+| `explainers` | none | Services set in code; they cannot be edited from the admin page. |
+| `map` | picture when possible | `"text"` always draws the map with characters. |
+| `map_scale` | `1` | Size of the drawn map. |
+| `map_density` | `2` | Pixels drawn for each pixel of the dock; `1` is enough on a display that is not high-density. |
+
+Set `review = false` to turn all of this off. The Review's colours are the
+highlight groups that start with `ScmReview`; none of its text is brighter
+than your colour scheme's own.
+
 ## Options
 
 | Option | Default | Meaning |
@@ -140,6 +218,7 @@ scheme's background.
 | `native_width` | `300` | Native dock width in pixels. |
 | `native.colors` | VS Code dark | Overrides for native colour roles such as `background`, `foreground`, `button_background` and `count_background`. |
 | `native.icon_theme` | found automatically | A directory holding an unpacked VS Code file-icon theme, or `false` for plain icons. |
+| `review` | on | How a diff explains itself; see above. `false` turns it off. |
 | `confirm` | Neovim's prompt | `function(message, choices)` returning true to proceed; replaces the discard and stage-all prompts. |
 
 File icons come from a VS Code file-icon theme. With none named, SCM uses the

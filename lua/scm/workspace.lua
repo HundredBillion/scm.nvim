@@ -280,6 +280,7 @@ local function menu(state)
     {state.ui.mode == 'tree' and 'View as List' or 'View as Tree', 'view'},
     {'Refresh', 'refresh'}, {'Commit', 'commit'},
     {'Stage All Changes', 'stage_all'}, {'Unstage All Changes', 'unstage_all'},
+    {'Explainers…', 'explainers'},
   }
   with_prompt(state, function(done)
     vim.ui.select(items, {prompt='Source Control', format_item=function(item) return item[1] end}, function(choice)
@@ -324,6 +325,10 @@ local function action(state, name, index, arg)
     state.ui.folded = not state.ui.folded
     render(state)
   elseif name == 'menu' then menu(state)
+  elseif name == 'explainers' then
+    -- The page is a Neovim window: the keyboard goes to the editor while it
+    -- is open and comes back to the Panel when it closes.
+    with_prompt(state, function(done) require('scm.review.admin').open(done) end)
   elseif name == 'edit' then edit(state, arg)
   elseif name == 'edit_end' or name == 'edit_next' then
     local repo = state.ui.editing_repo
@@ -429,7 +434,7 @@ function M.setup(opts)
   end
   end
   highlights()
-  require('scm.diff').setup()
+  require('scm.diff').setup(options)
   local group = vim.api.nvim_create_augroup('ScmWorkspace', {clear=true})
   vim.api.nvim_create_autocmd('ColorScheme', {group=group, callback=highlights})
   vim.api.nvim_create_autocmd({'BufWritePost','FocusGained'}, {group=group, callback=function(ev)
