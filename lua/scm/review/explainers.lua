@@ -337,8 +337,9 @@ function ASK.command(service, prompt, opts, cb, job)
   -- The command is run outside the repository, which may not be the reader's
   -- own: a tool that reads settings from where it runs finds none of the
   -- repository's. It is told where the repository is instead.
-  job.process = run(shell(service.command), prompt,
-    {cwd=vim.fn.stdpath('cache'), env=opts.cwd and {SCM_REPO=opts.cwd} or nil}, cb)
+  local outside = vim.fn.stdpath('cache')
+  vim.fn.mkdir(outside, 'p')
+  job.process = run(shell(service.command), prompt, {cwd=outside, env=opts.cwd and {SCM_REPO=opts.cwd} or nil}, cb)
 end
 
 -- Ask `service` the question in `prompt`. `opts.cwd` is the repository the

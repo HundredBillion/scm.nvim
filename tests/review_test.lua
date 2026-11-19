@@ -293,7 +293,10 @@ local cancel = Explainers.ask({name='Slow', kind='command', command='sleep 30; e
 vim.wait(200)
 cancel()
 vim.wait(300)
-assert(not answered and vim.trim(vim.fn.system('pgrep -f "sleep 30; echo late" || true')) == '', 'a question taken back stops the service and is never answered')
+assert(not answered, 'a question taken back is never answered')
+-- "3[0]" matches "30" but not itself, so pgrep does not find the shell that runs it.
+local left = vim.trim(vim.fn.system('pgrep -f "sleep 3[0]; echo late" || true'))
+assert(left == '', 'a question taken back stops the service: ' .. left)
 
 -- A diff with a Review kept for it.
 local root = vim.fn.tempname()
