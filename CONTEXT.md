@@ -52,6 +52,12 @@ Changes, Staged Changes, Changes, or Committed. A group is listed only when it
 has entries, and may be collapsed.
 _Avoid_: section (a Repository Section), category, status
 
+**Layer**:
+One level of a tech stack, such as UI, API, Logic, Data or DB, that a file is
+placed in by its path. In the list View Mode the Committed group is sorted by
+Layer from the top of the stack down and ends at the lowest Layer present.
+_Avoid_: tier, level, category
+
 **View Mode**:
 How a Change Group lists its File Entries: as a flat list, each file followed
 by its directory, or as a tree in which a directory whose only child is another

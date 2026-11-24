@@ -54,6 +54,40 @@ single-child folders joined into one row. Switch with `t`, the list/tree
 button in the "Changes" header, or `view = "tree"` in `opts` to start in the
 tree.
 
+In the list, the Committed group reads down the tech stack: UI first, then
+API, Logic, Data and DB, and it ends at the lowest Layer the branch touches.
+Within a Layer files are in path order, and a Layer's tests follow its files.
+Files in no Layer, such as documentation and configuration, come last. The
+other groups, and every group in the tree, stay in path order.
+
+A file is placed by its name first (`*.sql`, `schema.*` and `*.prisma` are
+DB), then by the deepest folder that names a Layer (`components`, `views` and
+`pages` are UI; `api`, `routes` and `controllers` are API; `services`, `domain`
+and `lib` are Logic; `models`, `repositories` and `store` are Data;
+`migrations`, `db` and `prisma` are DB), then by its extension (`.tsx`, `.vue`
+and `.css` are UI). A test is placed by the file it tests: `spec/models/user_spec.rb`
+follows `app/models`. The full lists are `require("scm.layers").DEFAULT`.
+
+When the guesses are wrong for a repository, give your own Layers. Each Layer
+has a `name` and any of `dirs` (folder names), `files` (Lua patterns on the
+file name) and `extensions`, listed from the top of the stack down:
+
+```lua
+require("scm").setup({
+  -- One list for every repository, or a function that returns the list for
+  -- one repository, or nil to keep the defaults there.
+  layers = function(repo)
+    if repo:match("/mobile$") then
+      return {
+        { name = "Screens", dirs = { "screens", "navigation" } },
+        { name = "State", dirs = { "store", "hooks" } },
+        { name = "Storage", dirs = { "storage" }, files = { "^schema%." } },
+      }
+    end
+  end,
+})
+```
+
 ## Keys and mouse
 
 | Key | Action |
@@ -228,7 +262,8 @@ than your colour scheme's own.
 | --- | --- | --- |
 | `renderer` | `"auto"` | `auto`, `terminal`, or `sprite`. |
 | `view` | `"list"` | `list` or `tree`. |
-| `group_limit` | `1000` | Most files one group lists. The group's count stays the true total and a last row says how many are left out. |
+| `group_limit` | `1000` | Most files one group lists. The group's count stays the true total and a last row says how many are left out. In the list, Committed keeps the top of the stack. |
+| `layers` | built in | The Layers the Committed list is sorted by: a list, or `function(repo)` returning one or nil; see above. |
 | `width` | `36` | Terminal panel width in columns. |
 | `native_width` | `300` | Native dock width in pixels. |
 | `native.colors` | VS Code dark | Overrides for native colour roles such as `background`, `foreground`, `button_background` and `count_background`. |

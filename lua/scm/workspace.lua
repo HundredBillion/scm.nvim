@@ -382,7 +382,7 @@ function M.toggle()
   local state = {root=root, tab=vim.api.nvim_get_current_tabpage(), editor=vim.api.nvim_get_current_win(),
     entries=core.cached(root) or {}, selected=1,
     ui={mode=options.view == 'tree' and 'tree' or 'list', collapsed={}, messages={}, folded=false,
-      limit=options.group_limit}}
+      limit=options.group_limit, layers=options.layers}}
   active = state
   local function on_action(name, index, arg) action(state, name, index, arg) end
   local docked = false
@@ -421,6 +421,8 @@ end
 function M.setup(opts)
   M.close()
   options = vim.tbl_deep_extend('force', core.defaults, {renderer='auto', width=36}, opts or {})
+  assert(options.layers == nil or type(options.layers) == 'table' or type(options.layers) == 'function',
+    'SCM option layers must be a list of Layers or a function')
   local function highlights()
   for name, value in pairs({ScmBackground={bg='#181818',fg='#cccccc'}, ScmSelection={bg='#04395e'},
     ScmModified={fg='#e2c08d'}, ScmAdded={fg='#81b88b'}, ScmDeleted={fg='#c74e39'},
@@ -461,7 +463,7 @@ function M.setup(opts)
     -- The native Panel also finds its icons ahead of the first open.
     if options ~= warmed_for or options.renderer == 'terminal' or not pcall(require, 'sprite') then return end
     local mode = options.view == 'tree' and 'tree' or 'list'
-    local rows = model.rows(core.cached(root) or {}, {mode=mode, limit=options.group_limit})
+    local rows = model.rows(core.cached(root) or {}, {mode=mode, limit=options.group_limit, layers=options.layers})
     pcall(require('scm.views.sprite').prewarm, options, rows, {mode=mode})
   end)
 end
