@@ -1,6 +1,7 @@
 -- scm.model — turns Repo Entries into the rows of the Panel.
 -- Rows are presentation-neutral: a Renderer decides how each kind is drawn.
 local M = {}
+local layers = require("scm.layers")
 
 -- Git's `status --porcelain=v2` documents exactly 7 unmerged XY codes; any of
 -- them means an active, unresolved conflict on that file.
@@ -182,6 +183,25 @@ local function tree_rows(add, e, group, files, depth, collapsed)
   walk(tree(files), depth, nil)
 end
 
+-- A Repo Entry's committed files in Layer order. The same `files` list is
+-- drawn many times between two refreshes, so its order is remembered for it.
+local layer_orders = setmetatable({}, { __mode = "k" })
+local function committed_by_layer(files, stack)
+  local known = layer_orders[files]
+  if known and known.stack == stack then
+    return known.sorted
+  end
+  local committed = {}
+  for i = 1, #files do
+    if not files[i].xy then
+      committed[#committed + 1] = files[i]
+    end
+  end
+  local sorted = layers.sort(committed, stack)
+  layer_orders[files] = { stack = stack, sorted = sorted }
+  return sorted
+end
+
 local function repo_row(add, e, collapsed)
   local id = "repo:" .. e.path
   local files = e.files or {}
@@ -225,6 +245,9 @@ function M.rows(entries, ui)
   local collapsed, mode, messages = ui.collapsed or {}, ui.mode or "list", ui.messages or {}
   local limit = ui.limit or M.GROUP_LIMIT
   local multi = #entries > 1
+  -- In a list, Committed reads down the stack from the UI. A tree keeps its
+  -- folders, so it keeps the order of paths.
+  local by_layer = mode == "list"
   local function add(row)
     rows[#rows + 1] = row
   end
@@ -261,6 +284,15 @@ function M.rows(entries, ui)
         if second then
           place(f, second)
         end
+      end
+      -- Sorted before the limit applies, so a long branch lists its top Layers.
+      if by_layer and counts.committed > 0 then
+        local sorted = committed_by_layer(files, layers.resolve(ui.layers, e.path))
+        local kept = {}
+        for i = 1, math.min(limit, #sorted) do
+          kept[i] = sorted[i]
+        end
+        listed.committed = kept
       end
       -- With several repositories, only one that has something to commit
       -- spends two rows on a commit box and button.
