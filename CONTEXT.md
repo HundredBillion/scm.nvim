@@ -53,9 +53,10 @@ has entries, and may be collapsed.
 _Avoid_: section (a Repository Section), category, status
 
 **Layer**:
-One level of a tech stack, such as UI, API, Logic, Data or DB, that a file is
-placed in by its path. In the list View Mode the Committed group is sorted by
-Layer from the top of the stack down and ends at the lowest Layer present.
+One level of a tech stack, such as UI, API, Logic, Data, DB or System, that a
+file is placed in by its path. In the list View Mode the Committed group is
+sorted by Layer from the top of the stack down and ends at the lowest Layer
+present; files outside the stack, such as docs and configuration, follow it.
 _Avoid_: tier, level, category
 
 **View Mode**:
