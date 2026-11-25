@@ -55,22 +55,31 @@ button in the "Changes" header, or `view = "tree"` in `opts` to start in the
 tree.
 
 In the list, the Committed group reads down the tech stack: UI first, then
-API, Logic, Data and DB, and it ends at the lowest Layer the branch touches.
-Within a Layer files are in path order, and a Layer's tests follow its files.
-Files in no Layer, such as documentation and configuration, come last. The
-other groups, and every group in the tree, stay in path order.
+API, Logic, Data, DB and System, and it ends at the lowest Layer the branch
+touches. Within a Layer files are in path order, and a Layer's tests follow its
+files. Files outside the stack always come last: documentation, configuration,
+lockfiles, dotfiles, CI, and build and packaging scripts. The other groups,
+and every group in the tree, stay in path order.
 
-A file is placed by its name first (`*.sql`, `schema.*` and `*.prisma` are
-DB), then by the deepest folder that names a Layer (`components`, `views` and
-`pages` are UI; `api`, `routes` and `controllers` are API; `services`, `domain`
-and `lib` are Logic; `models`, `repositories` and `store` are Data;
-`migrations`, `db` and `prisma` are DB), then by its extension (`.tsx`, `.vue`
-and `.css` are UI). A test is placed by the file it tests: `spec/models/user_spec.rb`
-follows `app/models`. The full lists are `require("scm.layers").DEFAULT`.
+A file is in the stack when it is source code, markup or styles (`.rs`, `.lua`,
+`.ts`, `.tsx`, `.css`, `.sql` and the like) and is not under `scripts`,
+`packaging`, `docs`, `tools`, `patches` or `.github`. Such a file is placed by
+its name first (`*.sql`, `schema.*` and `*.prisma` are DB), then by the deepest
+folder that names a Layer (`components`, `views` and `pages` are UI; `api`,
+`routes` and `controllers` are API; `services`, `domain` and `lib` are Logic;
+`models`, `repositories` and `store` are Data; `migrations`, `db` and `prisma`
+are DB; `platform`, `pty`, `ffi` and `sys` are System), then by its extension
+(`.tsx`, `.vue` and `.css` are UI). A folder also matches by its last word, so
+`terminal_view` is UI. Code that nothing places joins Logic. A test is placed by
+the file it tests: `spec/models/user_spec.rb` follows `app/models`, and
+`worker/cadence_tests.rs` follows the worker. The full lists are
+`require("scm.layers").DEFAULT` and `CODE_EXTENSIONS`.
 
 When the guesses are wrong for a repository, give your own Layers. Each Layer
 has a `name` and any of `dirs` (folder names), `files` (Lua patterns on the
-file name) and `extensions`, listed from the top of the stack down:
+file name) and `extensions`, listed from the top of the stack down. Mark one
+Layer `code = true` to take the code nothing else places; without one, that
+code follows your last Layer. Files outside the stack still come last:
 
 ```lua
 require("scm").setup({
