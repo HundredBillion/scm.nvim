@@ -303,8 +303,17 @@ end
 local EDITING = {edit=true, edit_end=true, edit_next=true, commit=true}
 -- `index` is the row the action is for; nil keeps the current selection, and
 -- an index with no row (the terminal Panel's header lines) means no row.
+-- Whether Neovim is already asking the user something, such as a save prompt.
+-- A click in the native Panel reaches Neovim even then, and acting on it would
+-- open files or prompts underneath a screen that is not drawn again until the
+-- question is answered.
+local function asking()
+  local mode = vim.api.nvim_get_mode().mode:sub(1, 1)
+  return mode == 'c' or mode == 'r'
+end
 local function action(state, name, index, arg)
   if active ~= state or vim.api.nvim_get_current_tabpage() ~= state.tab then return end
+  if asking() then return end
   state.selected = index or state.selected
   local row = state.rows and state.rows[state.selected]
   if state.ui.editing_repo and not EDITING[name] then

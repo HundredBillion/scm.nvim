@@ -44,6 +44,19 @@ local function press(key)
   assert(type(mapping.callback) == 'function', 'mapping exists: '..key)
   mapping.callback()
 end
+-- While Neovim is asking something, such as a save prompt, the Panel acts on
+-- nothing: a native click reaches it even then, and a file opened underneath
+-- the prompt is not drawn until the prompt is answered.
+local real_mode = vim.api.nvim_get_mode
+for _, mode in ipairs({'c', 'r?'}) do
+  vim.api.nvim_get_mode = function() return {mode=mode, blocking=false} end
+  local before = vim.api.nvim_buf_get_name(0)
+  press('<CR>')
+  vim.wait(200)
+  vim.api.nvim_get_mode = real_mode
+  assert(vim.api.nvim_buf_get_name(0) == before and vim.api.nvim_get_current_win() == win,
+    'the Panel ignores a click while Neovim asks something (mode '..mode..')')
+end
 press('<CR>')
 assert(vim.wait(5000, function() return vim.api.nvim_buf_get_name(0) == 'scm://' .. root .. '/sample.lua (diff)' end, 20),
   'Enter shows the diff of the file in the editor')
